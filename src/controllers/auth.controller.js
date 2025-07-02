@@ -2,6 +2,8 @@ import User from '../models/user.model.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import validator from 'validator';
+import { registerSchema, loginSchema } from '../validations/auth.validation.js';
+
 
 const JWT_SECRET = process.env.JWT_SECRET || 'mysecretkey';
 
@@ -11,10 +13,10 @@ export const register = async (req, res) => {
     const { name, email, password, phone, address } = req.body;
 
     // 1. Kiểm tra dữ liệu đầu vào
-    if (!name || !email || !password || !phone || !address) {
-      return res.status(400).json({ msg: "Vui lòng điền đầy đủ thông tin." });
-    }
-
+ const { error } = registerSchema.validate(req.body);
+if (error) {
+  return res.status(400).json({ msg: error.details[0].message });
+}
     if (!validator.isEmail(email)) {
       return res.status(400).json({ msg: "Email không hợp lệ." });
     }
@@ -57,10 +59,10 @@ export const login = async (req, res) => {
     const { email, password } = req.body;
 
     // 1. Kiểm tra dữ liệu đầu vào
-    if (!email || !password) {
-      return res.status(400).json({ msg: "Vui lòng nhập email và mật khẩu." });
-    }
-
+   const { error } = loginSchema.validate(req.body);
+if (error) {
+  return res.status(400).json({ msg: error.details[0].message });
+}
     // 2. Tìm user
     const user = await User.findOne({ email });
     if (!user) {
@@ -91,5 +93,20 @@ export const login = async (req, res) => {
   } catch (err) {
     console.error("❌ Lỗi đăng nhập:", err);
     res.status(500).json({ msg: "Lỗi máy chủ." });
+  }
+};
+
+export const getProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('-password'); // bỏ mật khẩu
+
+    if (!user) {
+      return res.status(404).json({ msg: 'Không tìm thấy người dùng.' });
+    }
+
+    res.json({ user });
+  } catch (err) {
+    console.error('Lỗi lấy profile:', err);
+    res.status(500).json({ msg: 'Lỗi máy chủ.' });
   }
 };
