@@ -8,6 +8,8 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, required: true },
     address: { type: String, required: true },
     role: { type: String, enum: ["customer", "admin"], default: "customer" },
+    resetCode: Number,
+    resetCodeExpires: Date,
   },
   { timestamps: true, versionKey: false }
 );
