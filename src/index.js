@@ -1,19 +1,33 @@
-import express, { response } from "express";
-import authRouter from './routers/auth.router'
-import mongoose from "mongoose";
+import express from 'express'
+import mongoose from 'mongoose'
+import dotenv from 'dotenv'
+import cors from 'cors'
+import authRouter from './routers/auth.router.js'
 
-const app = express();
+dotenv.config()
 
-// your beautiful code...
-mongoose.connect('mongodb://localhost:27017/duan_test')
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('Could not connect to MongoDB:', err));
-app.use(express.json());
-app.use(express.urlencoded())
+const app = express()
 
+// ✅ Mở toàn bộ CORS cho phép frontend truy cập
+app.use(cors());
+
+
+// ✅ Luôn để sau cors
+app.use(express.json())
+
+// ✅ Đặt sau express.json()
 app.use('/api', authRouter)
 
-
-app.listen(3000, () => {
-    console.log(`Server is running on port http://localhost:3000`);
-});
+// ✅ Kết nối DB
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => {
+    console.log('✅ Kết nối MongoDB thành công')
+    const PORT = process.env.PORT || 3000
+    app.listen(PORT, () => {
+      console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`)
+    })
+  })
+  .catch((err) => {
+    console.error('❌ Lỗi MongoDB:', err)
+  })
