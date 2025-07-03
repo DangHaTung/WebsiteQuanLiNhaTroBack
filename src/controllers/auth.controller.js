@@ -1,4 +1,5 @@
 import User from '../models/user.model.js';
+import Role from '../models/role.model.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import validator from 'validator';
@@ -13,11 +14,13 @@ export const register = async (req, res) => {
   try {
     const { name, email, password, phone, address } = req.body;
 
-    // 1. Kiểm tra dữ liệu đầu vào
- const { error } = registerSchema.validate(req.body);
-if (error) {
-  return res.status(400).json({ msg: error.details[0].message });
-}
+    // 1. Validate dữ liệu đầu vào với Joi
+    const { error } = registerSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({ msg: error.details[0].message });
+    }
+
+    // 2. Kiểm tra định dạng email và số điện thoại
     if (!validator.isEmail(email)) {
       return res.status(400).json({ msg: "Email không hợp lệ." });
     }
@@ -30,29 +33,36 @@ if (error) {
       return res.status(400).json({ msg: "Số điện thoại không hợp lệ." });
     }
 
-    // 2. Kiểm tra email đã tồn tại
+    // 3. Kiểm tra email đã tồn tại
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(409).json({ msg: "Email đã được sử dụng." });
     }
 
-    // 3. Mã hoá mật khẩu
+    // 4. Mã hoá mật khẩu
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 4. Tạo người dùng
-    const user = await User.create({
+    // 5. Lấy role "customer" từ bảng Role
+    const customerRole = await Role.findOne({ name: 'customer' });
+    if (!customerRole) {
+      return res.status(500).json({ msg: "Không tìm thấy role mặc định." });
+    }
+
+    // 6. Tạo người dùng với role là customer
+    await User.create({
       name,
       email,
       password: hashedPassword,
       phone,
-      address
+      address,
+      role: customerRole._id,
     });
 
-    res.status(201).json({ msg: "Đăng ký thành công!" });
+    return res.status(201).json({ msg: "Đăng ký thành công!" });
 
   } catch (err) {
     console.error("❌ Lỗi đăng ký:", err);
-    res.status(500).json({ msg: "Lỗi máy chủ." });
+    return res.status(500).json({ msg: "Lỗi máy chủ." });
   }
 };
 export const login = async (req, res) => {
@@ -65,7 +75,7 @@ if (error) {
   return res.status(400).json({ msg: error.details[0].message });
 }
     // 2. Tìm user
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).populate('role');
     if (!user) {
       return res.status(404).json({ msg: "Không tìm thấy người dùng." });
     }

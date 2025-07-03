@@ -23,3 +23,23 @@ export const verifyToken = (req, res, next) => {
     return res.status(403).json({ msg: 'Token không hợp lệ hoặc đã hết hạn.' });
   }
 };
+
+
+export const authenticate = async (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ msg: 'Không có token.' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id).populate('role'); // Thêm populate ở đây
+
+    if (!user) return res.status(401).json({ msg: 'Không tìm thấy người dùng.' });
+
+    req.user = user;
+    next();
+  } catch (err) {
+    res.status(401).json({ msg: 'Token không hợp lệ.' });
+  }
+};

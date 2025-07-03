@@ -3,6 +3,8 @@ import mongoose from 'mongoose'
 import dotenv from 'dotenv'
 import cors from 'cors'
 import authRouter from './routers/auth.router.js'
+import adminRouter from './routers/admin.router.js'
+import superadminRouter from './routers/superadmin.router.js'
 
 dotenv.config()
 
@@ -17,6 +19,8 @@ app.use(express.json())
 
 // ✅ Đặt sau express.json()
 app.use('/api', authRouter)
+app.use('/api/admin', adminRouter)
+app.use('/api/superadmin', superadminRouter)
 
 // ✅ Kết nối DB
 mongoose
