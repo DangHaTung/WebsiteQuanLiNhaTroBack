@@ -11,6 +11,10 @@ const userSchema = new mongoose.Schema({
     ref: 'Role',
     default: null,
   },
+  isDeleted: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const User = mongoose.model('User', userSchema)

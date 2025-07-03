@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
+import User from '../models/user.model.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'mysecretkey';
+const JWT_SECRET = process.env.JWT_SECRET || 'secret123';
 
 export const verifyToken = (req, res, next) => {
   try {
@@ -14,7 +15,7 @@ export const verifyToken = (req, res, next) => {
     const token = authHeader.split(' ')[1];
 
     // Xác thực token
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded; // req.user.userId sẵn sàng để sử dụng
 
     next();
@@ -33,7 +34,7 @@ export const authenticate = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).populate('role'); // Thêm populate ở đây
+    const user = await User.findById(decoded.userId).populate('role');
 
     if (!user) return res.status(401).json({ msg: 'Không tìm thấy người dùng.' });
 

@@ -20,7 +20,7 @@ app.use(express.json())
 // ✅ Đặt sau express.json()
 app.use('/api', authRouter)
 app.use('/api/admin', adminRouter)
-app.use('/api/superadmin', superadminRouter)
+app.use('/api/super-admin', superadminRouter)
 
 // ✅ Kết nối DB
 mongoose
