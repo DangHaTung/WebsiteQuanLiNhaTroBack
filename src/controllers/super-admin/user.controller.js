@@ -6,14 +6,14 @@ import Role from '../../models/role.model.js'
 
 export const getAllUsers = async (req, res) => {
   try {
-    const { search } = req.query
+    const { keyword } = req.query
 
     const query = { isDeleted: false }
 
-    if (search) {
+    if (keyword) {
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
+        { name: { $regex: keyword, $options: 'i' } },
+        { email: { $regex: keyword, $options: 'i' } },
       ]
     }
 
