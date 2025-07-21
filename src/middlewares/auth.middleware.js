@@ -7,7 +7,7 @@ export const verifyToken = (req, res, next) => {
   try {
     // Lấy token từ header: Authorization: Bearer <token>
     const authHeader = req.headers.authorization;
-
+    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ msg: 'Không có token xác thực.' });
     }
