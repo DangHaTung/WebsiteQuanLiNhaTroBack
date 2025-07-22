@@ -185,3 +185,16 @@ export const getPaginatedUsers = async (req, res) => {
     res.status(500).json({ msg: 'Lỗi máy chủ.' })
   }
 }
+export const getMe = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+    if (!user) return res.status(404).json({ msg: 'Không tìm thấy user' })
+    res.json({
+      name: user.name,
+      address: user.address,
+      phone: user.phone
+    })
+  } catch (err) {
+    res.status(500).json({ msg: 'Lỗi máy chủ.' })
+  }
+}
