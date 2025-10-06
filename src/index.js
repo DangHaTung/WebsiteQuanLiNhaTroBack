@@ -2,6 +2,7 @@ import express from 'express'
 import mongoose from 'mongoose'
 import dotenv from 'dotenv'
 import cors from 'cors'
+import authRoute from './routers/auth.route.js'
 
 dotenv.config()
 
@@ -17,7 +18,10 @@ app.use(cors());
 // Luôn để sau cors
 app.use(express.json())
 
-// Đặt sau express.json()
+//  Phân tích dữ liệu
+app.use(express.urlencoded({ extended: true }))
+
+app.use('/api', authRoute)
 
 
 //  Kết nối DB
