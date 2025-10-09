@@ -1,39 +1,40 @@
-import express from 'express'
-import mongoose from 'mongoose'
-import dotenv from 'dotenv'
-import cors from 'cors'
-import authRoute from './routers/auth.route.js'
+import express from "express";
+import mongoose from "mongoose";
+import dotenv from "dotenv";
+import cors from "cors";
+import authRoute from "./routers/auth.route.js";
+import tenantRoute from "./routers/tenant.route.js"; // ✅ import thêm route tenant
 
-dotenv.config()
+dotenv.config();
 
-const app = express()
+const app = express();
+
+// Middleware cơ bản
 app.use((req, res, next) => {
-  next()
-})
+next();
+});
 
-//  Mở toàn bộ CORS cho phép frontend truy cập
+// Cho phép CORS (frontend gọi được)
 app.use(cors());
 
+// Phân tích dữ liệu JSON và form
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Luôn để sau cors
-app.use(express.json())
+// Đăng ký route
+app.use("/api", authRoute);
+app.use("/api/tenants", tenantRoute); // ✅ thêm dòng này
 
-//  Phân tích dữ liệu
-app.use(express.urlencoded({ extended: true }))
-
-app.use('/api', authRoute)
-
-
-//  Kết nối DB
+// Kết nối MongoDB
 mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => {
-    console.log('Kết nối MongoDB thành công')
-    const PORT = process.env.PORT || 3000
-    app.listen(PORT, () => {
-      console.log(`Server đang chạy tại http://localhost:${PORT}`)
-    })
-  })
-  .catch((err) => {
-    console.error('Lỗi MongoDB:', err)
-  })
+.connect(process.env.MONGO_URI)
+.then(() => {
+console.log("✅ Kết nối MongoDB thành công");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`);
+});
+})
+.catch((err) => {
+console.error("❌ Lỗi kết nối MongoDB:", err);
+});
