@@ -4,6 +4,8 @@ import dotenv from "dotenv";
 import cors from "cors";
 import authRoute from "./routers/auth.route.js";
 import tenantRoute from "./routers/tenant.route.js"; // ✅ import thêm route tenant
+import billRoute from "./routers/bill.route.js";
+
 
 dotenv.config();
 
@@ -24,6 +26,7 @@ app.use(express.urlencoded({ extended: true }));
 // Đăng ký route
 app.use("/api", authRoute);
 app.use("/api/tenants", tenantRoute); // ✅ thêm dòng này
+app.use("/api/bills", billRoute);
 
 // Kết nối MongoDB
 mongoose
