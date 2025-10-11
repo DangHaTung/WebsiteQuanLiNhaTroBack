@@ -55,17 +55,17 @@ const validateParams = (schema) => (req, res, next) => {
 };
 
 // Routes cho Log CRUD
-router.post('/', validate(createLogSchema), createLog);
-router.get('/', validateQuery(getLogsSchema), getLogs);
-router.get('/stats', validateQuery(getLogStatsSchema), getLogStats);
-router.get('/cleanup', cleanupOldLogs);
+router.post('/logs', validate(createLogSchema), createLog);
+router.get('/logs', validateQuery(getLogsSchema), getLogs);
+router.get('/logs/stats', validateQuery(getLogStatsSchema), getLogStats);
+router.get('/logs/cleanup', cleanupOldLogs);
 
 // Routes cho Log theo ID
-router.get('/:id', getLogById);
-router.put('/:id', validate(updateLogSchema), updateLog);
-router.delete('/:id', deleteLog);
+router.get('/logs/:id', getLogById);
+router.put('/logs/:id', validate(updateLogSchema), updateLog);
+router.delete('/logs/:id', deleteLog);
 
 // Routes cho Log theo Entity
-router.get('/entity/:entity/:entityId', getLogsByEntity);
+router.get('/logs/entity/:entity/:entityId', getLogsByEntity);
 
 export default router;
