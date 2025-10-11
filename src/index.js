@@ -25,8 +25,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // Đăng ký route
 app.use("/api", authRoute);
-app.use("/api/tenants", tenantRoute); // ✅ thêm dòng này
-app.use("/api/bills", billRoute);
+app.use("/api", tenantRoute); 
+app.use("/api", billRoute);
 
 // Kết nối MongoDB
 mongoose
