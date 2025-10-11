@@ -3,9 +3,9 @@ import { getAllBills, createBill, updateBill, deleteBill } from "../controllers/
 
 const router = express.Router();
 
-router.get("/", getAllBills);
-router.post("/", createBill);
-router.put("/:id", updateBill);
-router.delete("/:id", deleteBill);
+router.get("/bills", getAllBills);
+router.post("/bills", createBill);
+router.put("/bills/:id", updateBill);
+router.delete("/bills/:id", deleteBill);
 
 export default router;
