@@ -25,3 +25,48 @@ export const getAllContracts = async (req, res) => {
 };
 
 // Tạo hợp đồng mới
+export const createContract = async (req, res) => {
+  try {
+    const contract = new Contract(req.body);
+    await contract.save();
+    res.status(201).json({
+      success: true,
+      message: "Tạo hợp đồng thành công",
+      data: contract,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Lỗi khi tạo hợp đồng",
+      success: false,
+      error: error.message,
+    });
+  }
+};
+
+// Lấy hợp đồng theo ID
+export const getContractById = async (req, res) => {
+  try {
+    const contract = await Contract.findById(req.params.id)
+      .populate("tenantId", "name phone")
+      .populate("roomId", "roomNumber");
+    
+    if (!contract) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy hợp đồng",
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "Lấy hợp đồng thành công",
+      data: contract,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Lỗi khi lấy hợp đồng",
+      success: false,
+      error: error.message,
+    });
+  }
+};
