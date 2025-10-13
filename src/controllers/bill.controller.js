@@ -40,7 +40,9 @@ export const createBill = async (req, res) => {
 // Cập nhật bill
 export const updateBill = async (req, res) => {
   try {
-    const bill = await Bill.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const bill = await Bill.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+    });
     if (!bill)
       return res.status(404).json({
         message: "Không tìm thấy hóa đơn để cập nhật",
