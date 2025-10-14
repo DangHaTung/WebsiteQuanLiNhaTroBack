@@ -1,6 +1,7 @@
 // src/controllers/room.controller.js
 import Room from "../models/room.model.js";
 import mongoose from "mongoose";
+import { v2 as cloudinary } from "cloudinary";
 
 /**
  * Lấy tất cả phòng (có thể filter theo status/type)
@@ -99,6 +100,11 @@ export const createRoom = async (req, res) => {
                 });
         }
 
+        // Map images from upload (multer-storage-cloudinary)
+        const uploadedImages = Array.isArray(req.files)
+            ? req.files.map((f) => ({ url: f.path, publicId: f.filename }))
+            : [];
+
         const room = new Room({
             roomNumber,
             type,
@@ -108,6 +114,8 @@ export const createRoom = async (req, res) => {
             district,
             status,
             currentContractSummary,
+            images: uploadedImages,
+            coverImageUrl: uploadedImages?.[0]?.url,
         });
 
         const saved = await room.save();
@@ -137,8 +145,22 @@ export const updateRoom = async (req, res) => {
                 success: false 
             });
 
-        const update = req.body;
+        const update = { ...req.body };
         delete update._id;
+
+        // Append new uploaded images if provided
+        const uploadedImages = Array.isArray(req.files)
+            ? req.files.map((f) => ({ url: f.path, publicId: f.filename }))
+            : [];
+        if (uploadedImages.length > 0) {
+            // Push new images, keep existing ones
+            const existing = await Room.findById(id).select("images coverImageUrl");
+            const mergedImages = [...(existing?.images || []), ...uploadedImages];
+            update.images = mergedImages;
+            if (!existing?.coverImageUrl) {
+                update.coverImageUrl = uploadedImages[0].url;
+            }
+        }
 
         const updated = await Room.findByIdAndUpdate(id, update, { new: true });
         if (!updated) return res.status(404).json({ 
@@ -189,5 +211,71 @@ export const deleteRoom = async (req, res) => {
             success: false,
             error: err.message 
         });
+    }
+};
+
+/**
+ * Xóa 1 ảnh của room theo publicId (Cloudinary + DB)
+ */
+export const removeRoomImage = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { publicId } = req.params;
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(400).json({ message: "ID phòng không hợp lệ", success: false });
+        }
+
+        const room = await Room.findById(id);
+        if (!room) {
+            return res.status(404).json({ message: "Không tìm thấy phòng", success: false });
+        }
+
+        // Gọi Cloudinary xoá ảnh
+        await cloudinary.uploader.destroy(publicId);
+
+        // Xoá trong DB
+        const nextImages = (room.images || []).filter((img) => img.publicId !== publicId);
+        let nextCover = room.coverImageUrl;
+        if (room.coverImageUrl && (room.images || []).some((img) => img.publicId === publicId)) {
+            nextCover = nextImages[0]?.url || null;
+        }
+
+        room.images = nextImages;
+        room.coverImageUrl = nextCover || undefined;
+        await room.save();
+
+        return res.json({ message: "Đã xoá ảnh", success: true, data: { images: room.images, coverImageUrl: room.coverImageUrl } });
+    } catch (err) {
+        return res.status(500).json({ message: "Lỗi khi xoá ảnh", success: false, error: err.message });
+    }
+};
+
+/**
+ * Đặt ảnh đại diện theo publicId
+ */
+export const setRoomCoverImage = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { publicId } = req.body;
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(400).json({ message: "ID phòng không hợp lệ", success: false });
+        }
+
+        const room = await Room.findById(id);
+        if (!room) {
+            return res.status(404).json({ message: "Không tìm thấy phòng", success: false });
+        }
+
+        const found = (room.images || []).find((img) => img.publicId === publicId);
+        if (!found) {
+            return res.status(404).json({ message: "Không tìm thấy ảnh với publicId", success: false });
+        }
+
+        room.coverImageUrl = found.url;
+        await room.save();
+
+        return res.json({ message: "Đã cập nhật ảnh đại diện", success: true, data: { coverImageUrl: room.coverImageUrl } });
+    } catch (err) {
+        return res.status(500).json({ message: "Lỗi khi cập nhật ảnh đại diện", success: false, error: err.message });
     }
 };

@@ -233,6 +233,34 @@ export const roomParamsSchema = Joi.object({
     }),
 });
 
+// Params cho hình ảnh phòng
+export const roomImageParamsSchema = Joi.object({
+  id: Joi.string()
+    .pattern(/^[0-9a-fA-F]{24}$/)
+    .required()
+    .messages({
+      'string.pattern.base': 'ID phải là ObjectId hợp lệ',
+      'any.required': 'ID là bắt buộc',
+    }),
+  publicId: Joi.string()
+    .min(3)
+    .required()
+    .messages({
+      'string.min': 'publicId không hợp lệ',
+      'any.required': 'publicId là bắt buộc',
+    }),
+});
+
+export const setCoverBodySchema = Joi.object({
+  publicId: Joi.string()
+    .min(3)
+    .required()
+    .messages({
+      'string.min': 'publicId không hợp lệ',
+      'any.required': 'publicId là bắt buộc',
+    }),
+});
+
 // Schema cho query parameters
 export const roomQuerySchema = Joi.object({
   status: Joi.string()
