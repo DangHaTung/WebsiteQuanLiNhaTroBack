@@ -4,9 +4,41 @@ import Tenant from "../models/tenant.model.js";
 export const getAllTenants = async (req, res) => {
   try {
     const tenants = await Tenant.find().sort({ createdAt: -1 });
-    res.json(tenants);
+    res.json({
+      success: true,
+      message: "Lấy danh sách tenants thành công",
+      data: tenants,
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ 
+      success: false,
+      message: "Lỗi khi lấy danh sách tenants",
+      error: err.message 
+    });
+  }
+};
+
+// Lấy tenant theo ID
+export const getTenantById = async (req, res) => {
+  try {
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy tenant"
+      });
+    }
+    res.json({
+      success: true,
+      message: "Lấy tenant thành công",
+      data: tenant,
+    });
+  } catch (err) {
+    res.status(500).json({ 
+      success: false,
+      message: "Lỗi khi lấy tenant",
+      error: err.message 
+    });
   }
 };
 
@@ -16,9 +48,17 @@ export const createTenant = async (req, res) => {
     const { fullName, phone, email, identityNo, note } = req.body;
     const tenant = new Tenant({ fullName, phone, email, identityNo, note });
     await tenant.save();
-    res.status(201).json({ message: "Thêm tenant thành công", tenant });
+    res.status(201).json({ 
+      success: true,
+      message: "Thêm tenant thành công", 
+      data: tenant 
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ 
+      success: false,
+      message: "Lỗi khi tạo tenant",
+      error: err.message 
+    });
   }
 };
 
@@ -29,10 +69,21 @@ export const updateTenant = async (req, res) => {
       new: true,
     });
     if (!tenant)
-      return res.status(404).json({ message: "Không tìm thấy tenant" });
-    res.json({ message: "Cập nhật thành công", tenant });
+      return res.status(404).json({ 
+        success: false,
+        message: "Không tìm thấy tenant" 
+      });
+    res.json({ 
+      success: true,
+      message: "Cập nhật thành công", 
+      data: tenant 
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ 
+      success: false,
+      message: "Lỗi khi cập nhật tenant",
+      error: err.message 
+    });
   }
 };
 
@@ -41,9 +92,19 @@ export const deleteTenant = async (req, res) => {
   try {
     const tenant = await Tenant.findByIdAndDelete(req.params.id);
     if (!tenant)
-      return res.status(404).json({ message: "Không tìm thấy tenant" });
-    res.json({ message: "Đã xóa tenant" });
+      return res.status(404).json({ 
+        success: false,
+        message: "Không tìm thấy tenant" 
+      });
+    res.json({ 
+      success: true,
+      message: "Đã xóa tenant" 
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ 
+      success: false,
+      message: "Lỗi khi xóa tenant",
+      error: err.message 
+    });
   }
 };

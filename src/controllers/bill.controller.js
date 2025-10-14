@@ -18,6 +18,30 @@ export const getAllBills = async (req, res) => {
   }
 };
 
+// Lấy hóa đơn theo ID
+export const getBillById = async (req, res) => {
+  try {
+    const bill = await Bill.findById(req.params.id).populate("contractId");
+    if (!bill) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy hóa đơn"
+      });
+    }
+    res.json({
+      success: true,
+      message: "Lấy hóa đơn thành công",
+      data: bill,
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: "Lỗi khi lấy hóa đơn",
+      error: err.message,
+    });
+  }
+};
+
 // Tạo hóa đơn mới
 export const createBill = async (req, res) => {
   try {
