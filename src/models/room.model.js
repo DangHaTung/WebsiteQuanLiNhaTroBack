@@ -54,6 +54,16 @@ const roomSchema = new Schema(
             default: "AVAILABLE",
             index: true,
         },
+        images: [
+            {
+                url: { type: String, required: true },
+                publicId: { type: String, required: true },
+            },
+        ],
+        coverImageUrl: {
+            type: String,
+            required: false,
+        },
         currentContractSummary: currentContractSummarySchema,
     },
     {
