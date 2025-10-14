@@ -15,57 +15,34 @@ import {
   getLogsSchema,
   getLogStatsSchema 
 } from '../validations/log.validation.js';
+import { 
+  validateBody, 
+  validateQuery, 
+  validateParams 
+} from '../middleware/validation.middleware.js';
+import { authenticateToken, authorize } from '../middleware/auth.middleware.js';
+import { asyncHandler } from '../middleware/error.middleware.js';
 
 const router = express.Router();
 
-// Middleware validation
-const validate = (schema) => (req, res, next) => {
-  const { error } = schema.validate(req.body);
-  if (error) {
-    return res.status(400).json({ 
-      message: 'Dữ liệu không hợp lệ',
-      error: error.details[0].message 
-    });
-  }
-  next();
-};
+// Tất cả route đều cần xác thực
+router.use(authenticateToken);
 
-// Middleware validation cho query params
-const validateQuery = (schema) => (req, res, next) => {
-  const { error } = schema.validate(req.query);
-  if (error) {
-    return res.status(400).json({ 
-      message: 'Tham số truy vấn không hợp lệ',
-      error: error.details[0].message 
-    });
-  }
-  next();
-};
-
-// Middleware validation cho params
-const validateParams = (schema) => (req, res, next) => {
-  const { error } = schema.validate(req.params);
-  if (error) {
-    return res.status(400).json({ 
-      message: 'Tham số đường dẫn không hợp lệ',
-      error: error.details[0].message 
-    });
-  }
-  next();
-};
+// Chỉ ADMIN mới có thể quản lý logs
+router.use(authorize('ADMIN'));
 
 // Routes cho Log CRUD
-router.post('/logs', validate(createLogSchema), createLog);
-router.get('/logs', validateQuery(getLogsSchema), getLogs);
-router.get('/logs/stats', validateQuery(getLogStatsSchema), getLogStats);
-router.get('/logs/cleanup', cleanupOldLogs);
+router.post('/logs', validateBody(createLogSchema), asyncHandler(createLog));
+router.get('/logs', validateQuery(getLogsSchema), asyncHandler(getLogs));
+router.get('/logs/stats', validateQuery(getLogStatsSchema), asyncHandler(getLogStats));
+router.get('/logs/cleanup', asyncHandler(cleanupOldLogs));
 
 // Routes cho Log theo ID
-router.get('/logs/:id', getLogById);
-router.put('/logs/:id', validate(updateLogSchema), updateLog);
-router.delete('/logs/:id', deleteLog);
+router.get('/logs/:id', asyncHandler(getLogById));
+router.put('/logs/:id', validateBody(updateLogSchema), asyncHandler(updateLog));
+router.delete('/logs/:id', asyncHandler(deleteLog));
 
 // Routes cho Log theo Entity
-router.get('/logs/entity/:entity/:entityId', getLogsByEntity);
+router.get('/logs/entity/:entity/:entityId', asyncHandler(getLogsByEntity));
 
 export default router;

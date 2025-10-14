@@ -7,20 +7,38 @@ import mongoose from "mongoose";
  */
 export const getAllRooms = async (req, res) => {
     try {
-        const { status, type, q } = req.query;
+        const { status, type, q, page = 1, limit = 10 } = req.query;
+        const skip = (page - 1) * limit;
+        
         const filter = {};
         if (status) filter.status = status;
         if (type) filter.type = type;
         if (q) filter.roomNumber = { $regex: q, $options: "i" };
 
-        const rooms = await Room.find(filter).sort({ roomNumber: 1 });
-        res.json({
-            message: "Fetched all rooms successfully",
-            total: rooms.length,
+        const rooms = await Room.find(filter)
+            .sort({ roomNumber: 1 })
+            .limit(limit)
+            .skip(skip);
+
+        const total = await Room.countDocuments(filter);
+
+        res.status(200).json({
+            message: "Lấy danh sách phòng thành công",
+            success: true,
             data: rooms,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(total / limit),
+                totalRecords: total,
+                limit: parseInt(limit),
+            },
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ 
+            message: "Lỗi khi lấy danh sách phòng",
+            success: false,
+            error: err.message 
+        });
     }
 };
 
@@ -31,17 +49,28 @@ export const getRoomById = async (req, res) => {
     try {
         const { id } = req.params;
         if (!mongoose.isValidObjectId(id))
-            return res.status(400).json({ error: "Invalid room id" });
+            return res.status(400).json({ 
+                message: "ID phòng không hợp lệ",
+                success: false 
+            });
 
         const room = await Room.findById(id);
-        if (!room) return res.status(404).json({ error: "Room not found" });
+        if (!room) return res.status(404).json({ 
+            message: "Không tìm thấy phòng",
+            success: false 
+        });
 
-        res.json({
-            message: "Fetched room successfully",
+        res.status(200).json({
+            message: "Lấy thông tin phòng thành công",
+            success: true,
             data: room,
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ 
+            message: "Lỗi khi lấy thông tin phòng",
+            success: false,
+            error: err.message 
+        });
     }
 };
 
@@ -64,7 +93,10 @@ export const createRoom = async (req, res) => {
         if (!roomNumber || !pricePerMonth) {
             return res
                 .status(400)
-                .json({ error: "roomNumber and pricePerMonth are required" });
+                .json({ 
+                    message: "Số phòng và giá thuê là bắt buộc",
+                    success: false 
+                });
         }
 
         const room = new Room({
@@ -80,11 +112,16 @@ export const createRoom = async (req, res) => {
 
         const saved = await room.save();
         res.status(201).json({
-            message: "Room created successfully",
+            message: "Tạo phòng thành công",
+            success: true,
             data: saved,
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ 
+            message: "Lỗi khi tạo phòng",
+            success: false,
+            error: err.message 
+        });
     }
 };
 
@@ -95,20 +132,31 @@ export const updateRoom = async (req, res) => {
     try {
         const { id } = req.params;
         if (!mongoose.isValidObjectId(id))
-            return res.status(400).json({ error: "Invalid room id" });
+            return res.status(400).json({ 
+                message: "ID phòng không hợp lệ",
+                success: false 
+            });
 
         const update = req.body;
         delete update._id;
 
         const updated = await Room.findByIdAndUpdate(id, update, { new: true });
-        if (!updated) return res.status(404).json({ error: "Room not found" });
+        if (!updated) return res.status(404).json({ 
+            message: "Không tìm thấy phòng",
+            success: false 
+        });
 
-        res.json({
-            message: "Room updated successfully",
+        res.status(200).json({
+            message: "Cập nhật phòng thành công",
+            success: true,
             data: updated,
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ 
+            message: "Lỗi khi cập nhật phòng",
+            success: false,
+            error: err.message 
+        });
     }
 };
 
@@ -119,16 +167,27 @@ export const deleteRoom = async (req, res) => {
     try {
         const { id } = req.params;
         if (!mongoose.isValidObjectId(id))
-            return res.status(400).json({ error: "Invalid room id" });
+            return res.status(400).json({ 
+                message: "ID phòng không hợp lệ",
+                success: false 
+            });
 
         const removed = await Room.findByIdAndDelete(id);
-        if (!removed) return res.status(404).json({ error: "Room not found" });
+        if (!removed) return res.status(404).json({ 
+            message: "Không tìm thấy phòng",
+            success: false 
+        });
 
-        res.json({
-            message: "Room deleted successfully",
-            id: removed._id,
+        res.status(200).json({
+            message: "Xóa phòng thành công",
+            success: true,
+            data: { id: removed._id },
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ 
+            message: "Lỗi khi xóa phòng",
+            success: false,
+            error: err.message 
+        });
     }
 };

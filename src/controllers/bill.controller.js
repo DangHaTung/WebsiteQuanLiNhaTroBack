@@ -3,15 +3,56 @@ import Bill from "../models/bill.model.js";
 // Lấy danh sách hóa đơn
 export const getAllBills = async (req, res) => {
   try {
-    const bills = await Bill.find().populate("contractId");
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (page - 1) * limit;
+
+    const bills = await Bill.find()
+      .populate("contractId")
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .skip(skip);
+
+    const total = await Bill.countDocuments();
+
     res.status(200).json({
       message: "Lấy danh sách hóa đơn thành công",
       success: true,
       data: bills,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalRecords: total,
+        limit: parseInt(limit),
+      },
     });
   } catch (err) {
     res.status(500).json({
       message: "Lỗi khi lấy danh sách hóa đơn",
+      success: false,
+      error: err.message,
+    });
+  }
+};
+
+// Lấy hóa đơn theo ID
+export const getBillById = async (req, res) => {
+  try {
+    const bill = await Bill.findById(req.params.id).populate("contractId");
+    if (!bill) {
+      return res.status(404).json({
+        message: "Không tìm thấy hóa đơn",
+        success: false,
+      });
+    }
+
+    res.status(200).json({
+      message: "Lấy hóa đơn thành công",
+      success: true,
+      data: bill,
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Lỗi khi lấy hóa đơn",
       success: false,
       error: err.message,
     });
