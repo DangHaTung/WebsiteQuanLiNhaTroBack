@@ -1,9 +1,9 @@
 import Bill from "../models/bill.model.js";
 
-// Lấy danh sách bills
+// Lấy danh sách hóa đơn
 export const getAllBills = async (req, res) => {
   try {
-    const bills = await Bill.find();
+    const bills = await Bill.find().populate("contractId");
     res.status(200).json({
       message: "Lấy danh sách hóa đơn thành công",
       success: true,
@@ -18,7 +18,7 @@ export const getAllBills = async (req, res) => {
   }
 };
 
-// Tạo bill mới
+// Tạo hóa đơn mới
 export const createBill = async (req, res) => {
   try {
     const bill = new Bill(req.body);
@@ -37,12 +37,10 @@ export const createBill = async (req, res) => {
   }
 };
 
-// Cập nhật bill
+// Cập nhật hóa đơn
 export const updateBill = async (req, res) => {
   try {
-    const bill = await Bill.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-    });
+    const bill = await Bill.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!bill)
       return res.status(404).json({
         message: "Không tìm thấy hóa đơn để cập nhật",
@@ -63,7 +61,7 @@ export const updateBill = async (req, res) => {
   }
 };
 
-// Xóa bill
+// Xóa hóa đơn
 export const deleteBill = async (req, res) => {
   try {
     const bill = await Bill.findByIdAndDelete(req.params.id);

@@ -1,16 +1,51 @@
 import mongoose from "mongoose";
 
-const billSchema = new mongoose.Schema({
-  bill_code: String,
-  tenant_name: String,
-  total_amount: Number,
-  due_date: Date,
-  status: {
-    type: String,
-    enum: ["unpaid", "partial", "paid"],
-    default: "unpaid",
+const { Schema } = mongoose;
+
+const billSchema = new Schema(
+  {
+    contractId: { type: Schema.Types.ObjectId, ref: "Contract", required: true },
+    billingDate: { type: Date, required: true },
+
+    status: {
+      type: String,
+      enum: ["UNPAID", "PARTIALLY_PAID", "PAID", "VOID"],
+      default: "UNPAID",
+    },
+
+    lineItems: [
+      {
+        item: { type: String, required: true },
+        quantity: { type: Number, default: 1 },
+        unitPrice: { type: Schema.Types.Decimal128, required: true },
+        lineTotal: { type: Schema.Types.Decimal128, required: true },
+      },
+    ],
+
+    amountDue: { type: Schema.Types.Decimal128, required: true },
+    amountPaid: { type: Schema.Types.Decimal128, default: 0 },
+
+    payments: [
+      {
+        paidAt: { type: Date },
+        amount: { type: Schema.Types.Decimal128 },
+        method: { type: String, enum: ["CASH", "BANK", "MOMO", "OTHER"] },
+        note: { type: String },
+      },
+    ],
+
+    note: { type: String },
+
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
   },
-  createdAt: { type: Date, default: Date.now },
+  { versionKey: false }
+);
+
+// Tự động cập nhật thời gian
+billSchema.pre("save", function (next) {
+  this.updatedAt = new Date();
+  next();
 });
 
 export default mongoose.model("Bill", billSchema);
