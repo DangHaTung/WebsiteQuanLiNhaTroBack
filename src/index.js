@@ -8,21 +8,20 @@ import tenantRoute from "./routers/tenant.route.js"; // import thêm route tenan
 import contractRoute from "./routers/contract.route.js"; // import thêm route contract
 import logRoute from "./routers/log.route.js"; // import thêm route log
 import roomRoute from "./routers/room.route.js";
+import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
 dotenv.config();
 
 const app = express();
 
-// Middleware cơ bản
-app.use((req, res, next) => {
-  next();
-});
+// Middleware logging request
+app.use(requestLogger);
 
 // Cho phép CORS (frontend gọi được)
 app.use(cors());
 
 // Phân tích dữ liệu JSON và form
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Đăng ký route
 app.use("/api", authRoute);
@@ -31,6 +30,12 @@ app.use("/api", billRoute);
 app.use("/api", contractRoute);
 app.use("/api", roomRoute);
 app.use("/api", logRoute);
+
+// Middleware xử lý route không tồn tại
+app.use(notFound);
+
+// Middleware xử lý lỗi chung
+app.use(errorHandler);
 
 // Kết nối MongoDB
 mongoose
