@@ -7,7 +7,7 @@ import billRoute from "./routers/bill.route.js";
 import tenantRoute from "./routers/tenant.route.js"; // import thêm route tenant
 import contractRoute from "./routers/contract.route.js"; // import thêm route contract
 import logRoute from "./routers/log.route.js"; // import thêm route log
-
+import roomRoute from "./routers/room.route.js";
 dotenv.config();
 
 const app = express();
@@ -29,6 +29,7 @@ app.use("/api", authRoute);
 app.use("/api", tenantRoute);
 app.use("/api", billRoute);
 app.use("/api", contractRoute);
+app.use("/api", roomRoute);
 app.use("/api", logRoute);
 
 // Kết nối MongoDB
