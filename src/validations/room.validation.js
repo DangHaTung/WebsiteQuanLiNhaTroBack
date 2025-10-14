@@ -67,6 +67,20 @@ export const createRoomSchema = Joi.object({
       'any.only': 'Status phải là AVAILABLE, OCCUPIED hoặc MAINTENANCE',
     }),
 
+  // Cho phép truyền URL ảnh trong JSON
+  images: Joi.array()
+    .items(
+      Joi.alternatives().try(
+        Joi.string().uri().messages({ 'string.uri': 'Image URL không hợp lệ' }),
+        Joi.object({
+          url: Joi.string().uri().required().messages({ 'string.uri': 'Image URL không hợp lệ', 'any.required': 'url là bắt buộc' }),
+          publicId: Joi.string().optional(),
+        })
+      )
+    )
+    .optional()
+    .messages({ 'array.base': 'Images phải là mảng' }),
+
   currentContractSummary: Joi.object({
     contractId: Joi.string()
       .pattern(/^[0-9a-fA-F]{24}$/)
@@ -174,6 +188,19 @@ export const updateRoomSchema = Joi.object({
     .messages({
       'any.only': 'Status phải là AVAILABLE, OCCUPIED hoặc MAINTENANCE',
     }),
+
+  images: Joi.array()
+    .items(
+      Joi.alternatives().try(
+        Joi.string().uri().messages({ 'string.uri': 'Image URL không hợp lệ' }),
+        Joi.object({
+          url: Joi.string().uri().required().messages({ 'string.uri': 'Image URL không hợp lệ', 'any.required': 'url là bắt buộc' }),
+          publicId: Joi.string().optional(),
+        })
+      )
+    )
+    .optional()
+    .messages({ 'array.base': 'Images phải là mảng' }),
 
   currentContractSummary: Joi.object({
     contractId: Joi.string()

@@ -31,9 +31,14 @@ export const validate = (schema, source = 'body') => {
     if (source === 'body') {
       req.body = value;
     } else if (source === 'query') {
-      req.query = value;
+      // Express 5: req.query là getter, không được gán lại
+      // Xoá keys cũ và merge giá trị đã validate
+      Object.keys(req.query || {}).forEach((k) => delete req.query[k]);
+      Object.assign(req.query, value);
     } else if (source === 'params') {
-      req.params = value;
+      // Tránh gán lại toàn bộ object
+      Object.keys(req.params || {}).forEach((k) => delete req.params[k]);
+      Object.assign(req.params, value);
     }
 
     next();
