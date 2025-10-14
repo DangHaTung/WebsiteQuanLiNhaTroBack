@@ -24,4 +24,10 @@ const imageStorage = new CloudinaryStorage({
 export const uploadSingleImage = multer({ storage: imageStorage }).single("image");
 export const uploadMultipleImages = multer({ storage: imageStorage }).array("images", 10);
 
+// Accept both `images` (multiple) and `image` (single) fields
+export const uploadRoomImages = multer({ storage: imageStorage }).fields([
+  { name: "images", maxCount: 10 },
+  { name: "image", maxCount: 1 },
+]);
+
 

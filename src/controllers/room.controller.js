@@ -101,9 +101,43 @@ export const createRoom = async (req, res) => {
         }
 
         // Map images from upload (multer-storage-cloudinary)
-        const uploadedImages = Array.isArray(req.files)
-            ? req.files.map((f) => ({ url: f.path, publicId: f.filename }))
-            : [];
+        // Normalize files from multer: fields can be in req.files.images (array) or req.files.image (array)
+        let uploadedImages = [];
+        if (Array.isArray(req.files)) {
+            uploadedImages = req.files.map((f) => ({ url: f.path, publicId: f.filename }));
+        } else if (req.files && (req.files.images || req.files.image)) {
+            const list = [
+                ...(Array.isArray(req.files.images) ? req.files.images : []),
+                ...(Array.isArray(req.files.image) ? req.files.image : []),
+            ];
+            uploadedImages = list.map((f) => ({ url: f.path, publicId: f.filename }));
+        }
+
+        // Also accept images from JSON body: images: ["https://..."] or [{url, publicId}]
+        let bodyImages = [];
+        if (Array.isArray(req.body?.images)) {
+            try {
+                // Nếu images gửi ở dạng string (JSON), parse trước
+                if (typeof req.body.images === "string") {
+                    const parsed = JSON.parse(req.body.images);
+                    if (Array.isArray(parsed)) {
+                        req.body.images = parsed;
+                    }
+                }
+            } catch {}
+            bodyImages = (Array.isArray(req.body.images) ? req.body.images : [])
+                .map((it) => (typeof it === "string" ? { url: it } : it))
+                .filter((it) => it && it.url);
+        } else if (typeof req.body?.images === "string") {
+            try {
+                const parsed = JSON.parse(req.body.images);
+                if (Array.isArray(parsed)) {
+                    bodyImages = parsed
+                        .map((it) => (typeof it === "string" ? { url: it } : it))
+                        .filter((it) => it && it.url);
+                }
+            } catch {}
+        }
 
         const room = new Room({
             roomNumber,
@@ -114,8 +148,8 @@ export const createRoom = async (req, res) => {
             district,
             status,
             currentContractSummary,
-            images: uploadedImages,
-            coverImageUrl: uploadedImages?.[0]?.url,
+            images: [...bodyImages, ...uploadedImages],
+            coverImageUrl: (bodyImages?.[0]?.url) || (uploadedImages?.[0]?.url),
         });
 
         const saved = await room.save();
@@ -149,9 +183,29 @@ export const updateRoom = async (req, res) => {
         delete update._id;
 
         // Append new uploaded images if provided
-        const uploadedImages = Array.isArray(req.files)
-            ? req.files.map((f) => ({ url: f.path, publicId: f.filename }))
-            : [];
+        let uploadedImages = [];
+        if (Array.isArray(req.files)) {
+            uploadedImages = req.files.map((f) => ({ url: f.path, publicId: f.filename }));
+        } else if (req.files && (req.files.images || req.files.image)) {
+            const list = [
+                ...(Array.isArray(req.files.images) ? req.files.images : []),
+                ...(Array.isArray(req.files.image) ? req.files.image : []),
+            ];
+            uploadedImages = list.map((f) => ({ url: f.path, publicId: f.filename }));
+        }
+        // Merge images from body if provided
+        let bodyImagesUpdate = [];
+        if (Array.isArray(req.body?.images) || typeof req.body?.images === "string") {
+            try {
+                if (typeof req.body.images === "string") {
+                    const parsed = JSON.parse(req.body.images);
+                    if (Array.isArray(parsed)) req.body.images = parsed;
+                }
+            } catch {}
+            bodyImagesUpdate = (Array.isArray(req.body.images) ? req.body.images : [])
+                .map((it) => (typeof it === "string" ? { url: it } : it))
+                .filter((it) => it && it.url);
+        }
         if (uploadedImages.length > 0) {
             // Push new images, keep existing ones
             const existing = await Room.findById(id).select("images coverImageUrl");
@@ -159,6 +213,14 @@ export const updateRoom = async (req, res) => {
             update.images = mergedImages;
             if (!existing?.coverImageUrl) {
                 update.coverImageUrl = uploadedImages[0].url;
+            }
+        }
+        if (bodyImagesUpdate.length > 0) {
+            const existing = await Room.findById(id).select("images coverImageUrl");
+            const mergedImages = [...(existing?.images || []), ...bodyImagesUpdate];
+            update.images = mergedImages;
+            if (!existing?.coverImageUrl) {
+                update.coverImageUrl = bodyImagesUpdate[0].url;
             }
         }
 

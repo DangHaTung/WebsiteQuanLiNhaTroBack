@@ -21,7 +21,7 @@ import {
 } from "../middleware/validation.middleware.js";
 import { authenticateToken, authorize } from "../middleware/auth.middleware.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
-import { uploadSingleImage, uploadMultipleImages } from "../middleware/upload.middleware.js";
+import { uploadRoomImages } from "../middleware/upload.middleware.js";
 
 const router = express.Router();
 
@@ -33,8 +33,8 @@ router.use(authorize('ADMIN', 'STAFF'));
 
 router.get("/rooms", validateQuery(roomQuerySchema), asyncHandler(getAllRooms));
 router.get("/rooms/:id", validateParams(roomParamsSchema), asyncHandler(getRoomById));
-router.post("/rooms", uploadMultipleImages, validateBody(createRoomSchema), asyncHandler(createRoom));
-router.put("/rooms/:id", validateParams(roomParamsSchema), uploadMultipleImages, validateBody(updateRoomSchema), asyncHandler(updateRoom));
+router.post("/rooms", uploadRoomImages, validateBody(createRoomSchema), asyncHandler(createRoom));
+router.put("/rooms/:id", validateParams(roomParamsSchema), uploadRoomImages, validateBody(updateRoomSchema), asyncHandler(updateRoom));
 router.delete("/rooms/:id", validateParams(roomParamsSchema), asyncHandler(deleteRoom));
 
 // Image management
