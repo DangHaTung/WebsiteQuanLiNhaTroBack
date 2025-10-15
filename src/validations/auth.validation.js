@@ -37,3 +37,14 @@ export const loginSchema = Joi.object({
     "string.empty": "Mật khẩu không được bỏ trống",
   }),
 });
+
+export const resetPasswordSchema = Joi.object({
+  currentPassword: Joi.string().required().messages({
+    "string.empty": "Mật khẩu hiện tại không được bỏ trống",
+  }),
+
+  newPassword: Joi.string().min(6).required().messages({
+    "string.empty": "Mật khẩu mới không được bỏ trống",
+    "string.min": "Mật khẩu mới phải ít nhất 6 ký tự",
+  }),
+});

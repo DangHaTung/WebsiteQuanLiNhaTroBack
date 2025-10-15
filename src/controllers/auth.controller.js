@@ -71,3 +71,38 @@ export const login = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+export const resetPassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user._id; // Lấy từ middleware authenticateToken
+
+    // Tìm user hiện tại
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
+
+    // Kiểm tra mật khẩu hiện tại
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({ message: "Mật khẩu hiện tại không đúng" });
+    }
+
+    // Hash mật khẩu mới
+    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+
+    // Cập nhật mật khẩu
+    await User.findByIdAndUpdate(userId, { passwordHash: hashedNewPassword });
+
+    res.json({
+      message: "Đặt lại mật khẩu thành công",
+      success: true,
+    });
+  } catch (err) {
+    res.status(500).json({ 
+      message: "Lỗi server khi đặt lại mật khẩu",
+      error: err.message 
+    });
+  }
+};
