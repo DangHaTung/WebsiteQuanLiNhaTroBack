@@ -1,6 +1,7 @@
+import 'dotenv/config';
+// dotenv.config();
 import express from "express";
 import mongoose from "mongoose";
-import dotenv from "dotenv";
 import cors from "cors";
 import authRoute from "./routers/auth.route.js";
 import billRoute from "./routers/bill.route.js";
@@ -9,7 +10,9 @@ import contractRoute from "./routers/contract.route.js"; // import thêm route c
 import logRoute from "./routers/log.route.js"; // import thêm route log
 import roomRoute from "./routers/room.route.js";
 import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
-dotenv.config();
+import payRouter from "./routers/payment.route.js";
+
+
 
 const app = express();
 
@@ -30,6 +33,7 @@ app.use("/api", billRoute);
 app.use("/api", contractRoute);
 app.use("/api", roomRoute);
 app.use("/api", logRoute);
+app.use("/pay", payRouter);
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);
