@@ -25,14 +25,21 @@ const billSchema = new Schema(
     amountDue: { type: Schema.Types.Decimal128, required: true },
     amountPaid: { type: Schema.Types.Decimal128, default: 0 },
 
-    payments: [
-      {
-        paidAt: { type: Date },
-        amount: { type: Schema.Types.Decimal128 },
-        method: { type: String, enum: ["CASH", "BANK", "MOMO", "OTHER"] },
-        note: { type: String },
-      },
-    ],
+   payments: [
+  {
+    paidAt: { type: Date },
+    amount: { type: Schema.Types.Decimal128 },
+    method: { 
+      type: String, 
+      enum: ["CASH", "BANK", "MOMO", "VNPAY", "ZALOPAY", "OTHER", "REDIRECT"], 
+      default: "OTHER" 
+    },
+    provider: { type: String },
+    transactionId: { type: String },
+    note: { type: String },
+    metadata: { type: Schema.Types.Mixed },
+  },
+],
 
     note: { type: String },
 
