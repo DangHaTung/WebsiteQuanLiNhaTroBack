@@ -18,14 +18,14 @@ import { asyncHandler } from "../middleware/error.middleware.js";
 
 const router = express.Router();
 
-// Bảo vệ tất cả routes
-router.use(authenticateToken);
-
-// Chỉ ADMIN và STAFF được quản trị user
-router.use(authorize('ADMIN', 'STAFF'));
-
+// Public routes - không cần authentication
 router.get("/users", validateQuery(userQuerySchema), asyncHandler(getAllUsers));
 router.get("/users/:id", validateParams(userParamsSchema), asyncHandler(getUserById));
+
+// Protected routes - cần authentication và authorization
+router.use(authenticateToken);
+router.use(authorize('ADMIN', 'STAFF'));
+
 router.post("/users", validateBody(createUserSchema), asyncHandler(createUser));
 router.put("/users/:id", validateParams(userParamsSchema), validateBody(updateUserSchema), asyncHandler(updateUser));
 router.delete("/users/:id", validateParams(userParamsSchema), asyncHandler(deleteUser));
