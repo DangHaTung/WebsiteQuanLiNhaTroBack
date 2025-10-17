@@ -9,6 +9,7 @@ import tenantRoute from "./routers/tenant.route.js"; // import thêm route tenan
 import contractRoute from "./routers/contract.route.js"; // import thêm route contract
 import logRoute from "./routers/log.route.js"; // import thêm route log
 import roomRoute from "./routers/room.route.js";
+import userRoute from "./routers/user.route.js";
 import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
 import payRouter from "./routers/payment.route.js";
 
@@ -33,6 +34,7 @@ app.use("/api", billRoute);
 app.use("/api", contractRoute);
 app.use("/api", roomRoute);
 app.use("/api", logRoute);
+app.use("/api", userRoute);
 app.use("/pay", payRouter);
 
 // Middleware xử lý route không tồn tại
