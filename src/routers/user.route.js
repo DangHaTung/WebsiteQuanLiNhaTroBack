@@ -13,22 +13,19 @@ import {
   userQuerySchema,
 } from "../validations/user.validation.js";
 import { validateBody, validateParams, validateQuery } from "../middleware/validation.middleware.js";
-import { authenticateToken, authorize } from "../middleware/auth.middleware.js";
+import { authenticateToken, authorize, optionalAuth } from "../middleware/auth.middleware.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
 
 const router = express.Router();
 
-// Public routes - không cần authentication
-router.get("/users", validateQuery(userQuerySchema), asyncHandler(getAllUsers));
-router.get("/users/:id", validateParams(userParamsSchema), asyncHandler(getUserById));
+// Public routes - không cần authentication nhưng có thể lấy thông tin user nếu có token
+router.get("/users", optionalAuth, validateQuery(userQuerySchema), asyncHandler(getAllUsers));
+router.get("/users/:id", optionalAuth, validateParams(userParamsSchema), asyncHandler(getUserById));
 
 // Protected routes - cần authentication và authorization
-router.use(authenticateToken);
-router.use(authorize('ADMIN', 'STAFF'));
-
-router.post("/users", validateBody(createUserSchema), asyncHandler(createUser));
-router.put("/users/:id", validateParams(userParamsSchema), validateBody(updateUserSchema), asyncHandler(updateUser));
-router.delete("/users/:id", validateParams(userParamsSchema), asyncHandler(deleteUser));
+router.post("/users", authenticateToken, authorize('ADMIN', 'STAFF'), validateBody(createUserSchema), asyncHandler(createUser));
+router.put("/users/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(userParamsSchema), validateBody(updateUserSchema), asyncHandler(updateUser));
+router.delete("/users/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(userParamsSchema), asyncHandler(deleteUser));
 
 export default router;
 
