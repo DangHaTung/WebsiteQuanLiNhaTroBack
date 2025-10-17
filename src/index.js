@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import "dotenv/config";
 // dotenv.config();
 import express from "express";
 import mongoose from "mongoose";
@@ -9,10 +9,12 @@ import tenantRoute from "./routers/tenant.route.js"; // import thêm route tenan
 import contractRoute from "./routers/contract.route.js"; // import thêm route contract
 import logRoute from "./routers/log.route.js"; // import thêm route log
 import roomRoute from "./routers/room.route.js";
-import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
+import {
+  errorHandler,
+  notFound,
+  requestLogger,
+} from "./middleware/error.middleware.js";
 import payRouter from "./routers/payment.route.js";
-
-
 
 const app = express();
 
@@ -23,9 +25,9 @@ app.use(requestLogger);
 app.use(cors());
 
 // Phân tích dữ liệu JSON và form
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use("/api/payment", payRouter);
 // Đăng ký route
 app.use("/api", authRoute);
 app.use("/api", tenantRoute);
@@ -33,7 +35,7 @@ app.use("/api", billRoute);
 app.use("/api", contractRoute);
 app.use("/api", roomRoute);
 app.use("/api", logRoute);
-app.use("/pay", payRouter);
+
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);
