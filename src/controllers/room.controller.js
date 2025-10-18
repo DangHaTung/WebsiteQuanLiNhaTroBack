@@ -4,6 +4,22 @@ import mongoose from "mongoose";
 import { v2 as cloudinary } from "cloudinary";
 
 /**
+ * Helper convert Decimal128 sang number
+ */
+const convertDecimal128 = (value) => {
+    if (value === null || value === undefined) return null;
+    return parseFloat(value.toString());
+};
+
+/**
+ * Chuyển đổi room object cho frontend
+ */
+const formatRoom = (room) => ({
+    ...room.toObject(),
+    pricePerMonth: convertDecimal128(room.pricePerMonth),
+});
+
+/**
  * Lấy tất cả phòng (có thể filter theo status/type)
  */
 export const getAllRooms = async (req, res) => {
@@ -23,10 +39,12 @@ export const getAllRooms = async (req, res) => {
 
         const total = await Room.countDocuments(filter);
 
+        const roomsData = rooms.map(formatRoom);
+
         res.status(200).json({
             message: "Lấy danh sách phòng thành công",
             success: true,
-            data: rooms,
+            data: roomsData,
             pagination: {
                 currentPage: parseInt(page),
                 totalPages: Math.ceil(total / limit),
@@ -64,7 +82,7 @@ export const getRoomById = async (req, res) => {
         res.status(200).json({
             message: "Lấy thông tin phòng thành công",
             success: true,
-            data: room,
+            data: formatRoom(room),
         });
     } catch (err) {
         res.status(500).json({ 
@@ -92,16 +110,12 @@ export const createRoom = async (req, res) => {
         } = req.body;
 
         if (!roomNumber || !pricePerMonth) {
-            return res
-                .status(400)
-                .json({ 
-                    message: "Số phòng và giá thuê là bắt buộc",
-                    success: false 
-                });
+            return res.status(400).json({ 
+                message: "Số phòng và giá thuê là bắt buộc",
+                success: false 
+            });
         }
 
-        // Map images from upload (multer-storage-cloudinary)
-        // Normalize files from multer: fields can be in req.files.images (array) or req.files.image (array)
         let uploadedImages = [];
         if (Array.isArray(req.files)) {
             uploadedImages = req.files.map((f) => ({ url: f.path, publicId: f.filename }));
@@ -113,16 +127,12 @@ export const createRoom = async (req, res) => {
             uploadedImages = list.map((f) => ({ url: f.path, publicId: f.filename }));
         }
 
-        // Also accept images from JSON body: images: ["https://..."] or [{url, publicId}]
         let bodyImages = [];
         if (Array.isArray(req.body?.images)) {
             try {
-                // Nếu images gửi ở dạng string (JSON), parse trước
                 if (typeof req.body.images === "string") {
                     const parsed = JSON.parse(req.body.images);
-                    if (Array.isArray(parsed)) {
-                        req.body.images = parsed;
-                    }
+                    if (Array.isArray(parsed)) req.body.images = parsed;
                 }
             } catch {}
             bodyImages = (Array.isArray(req.body.images) ? req.body.images : [])
@@ -153,10 +163,11 @@ export const createRoom = async (req, res) => {
         });
 
         const saved = await room.save();
+
         res.status(201).json({
             message: "Tạo phòng thành công",
             success: true,
-            data: saved,
+            data: formatRoom(saved),
         });
     } catch (err) {
         res.status(500).json({ 
@@ -182,7 +193,6 @@ export const updateRoom = async (req, res) => {
         const update = { ...req.body };
         delete update._id;
 
-        // Append new uploaded images if provided
         let uploadedImages = [];
         if (Array.isArray(req.files)) {
             uploadedImages = req.files.map((f) => ({ url: f.path, publicId: f.filename }));
@@ -193,7 +203,7 @@ export const updateRoom = async (req, res) => {
             ];
             uploadedImages = list.map((f) => ({ url: f.path, publicId: f.filename }));
         }
-        // Merge images from body if provided
+
         let bodyImagesUpdate = [];
         if (Array.isArray(req.body?.images) || typeof req.body?.images === "string") {
             try {
@@ -206,22 +216,18 @@ export const updateRoom = async (req, res) => {
                 .map((it) => (typeof it === "string" ? { url: it } : it))
                 .filter((it) => it && it.url);
         }
+
         if (uploadedImages.length > 0) {
-            // Push new images, keep existing ones
             const existing = await Room.findById(id).select("images coverImageUrl");
             const mergedImages = [...(existing?.images || []), ...uploadedImages];
             update.images = mergedImages;
-            if (!existing?.coverImageUrl) {
-                update.coverImageUrl = uploadedImages[0].url;
-            }
+            if (!existing?.coverImageUrl) update.coverImageUrl = uploadedImages[0].url;
         }
         if (bodyImagesUpdate.length > 0) {
             const existing = await Room.findById(id).select("images coverImageUrl");
             const mergedImages = [...(existing?.images || []), ...bodyImagesUpdate];
             update.images = mergedImages;
-            if (!existing?.coverImageUrl) {
-                update.coverImageUrl = bodyImagesUpdate[0].url;
-            }
+            if (!existing?.coverImageUrl) update.coverImageUrl = bodyImagesUpdate[0].url;
         }
 
         const updated = await Room.findByIdAndUpdate(id, update, { new: true });
@@ -233,7 +239,7 @@ export const updateRoom = async (req, res) => {
         res.status(200).json({
             message: "Cập nhật phòng thành công",
             success: true,
-            data: updated,
+            data: formatRoom(updated),
         });
     } catch (err) {
         res.status(500).json({ 
@@ -281,21 +287,14 @@ export const deleteRoom = async (req, res) => {
  */
 export const removeRoomImage = async (req, res) => {
     try {
-        const { id } = req.params;
-        const { publicId } = req.params;
-        if (!mongoose.isValidObjectId(id)) {
-            return res.status(400).json({ message: "ID phòng không hợp lệ", success: false });
-        }
+        const { id, publicId } = req.params;
+        if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: "ID phòng không hợp lệ", success: false });
 
         const room = await Room.findById(id);
-        if (!room) {
-            return res.status(404).json({ message: "Không tìm thấy phòng", success: false });
-        }
+        if (!room) return res.status(404).json({ message: "Không tìm thấy phòng", success: false });
 
-        // Gọi Cloudinary xoá ảnh
         await cloudinary.uploader.destroy(publicId);
 
-        // Xoá trong DB
         const nextImages = (room.images || []).filter((img) => img.publicId !== publicId);
         let nextCover = room.coverImageUrl;
         if (room.coverImageUrl && (room.images || []).some((img) => img.publicId === publicId)) {
@@ -319,19 +318,13 @@ export const setRoomCoverImage = async (req, res) => {
     try {
         const { id } = req.params;
         const { publicId } = req.body;
-        if (!mongoose.isValidObjectId(id)) {
-            return res.status(400).json({ message: "ID phòng không hợp lệ", success: false });
-        }
+        if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: "ID phòng không hợp lệ", success: false });
 
         const room = await Room.findById(id);
-        if (!room) {
-            return res.status(404).json({ message: "Không tìm thấy phòng", success: false });
-        }
+        if (!room) return res.status(404).json({ message: "Không tìm thấy phòng", success: false });
 
         const found = (room.images || []).find((img) => img.publicId === publicId);
-        if (!found) {
-            return res.status(404).json({ message: "Không tìm thấy ảnh với publicId", success: false });
-        }
+        if (!found) return res.status(404).json({ message: "Không tìm thấy ảnh với publicId", success: false });
 
         room.coverImageUrl = found.url;
         await room.save();
