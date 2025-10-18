@@ -52,7 +52,14 @@ export const login = async (req, res) => {
 
     // tạo JWT token
     const token = jwt.sign(
-      { id: user._id, role: user.role },
+      {
+        id: user._id,
+        role: user.role,
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        createdAt: user.createdAt,
+      },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
@@ -64,7 +71,9 @@ export const login = async (req, res) => {
         id: user._id,
         username: user.fullName,
         email: user.email,
+        phone: user.phone,
         role: user.role,
+        createdAt: user.createdAt,
       },
     });
   } catch (err) {
