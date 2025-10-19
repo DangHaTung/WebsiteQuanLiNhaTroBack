@@ -12,12 +12,34 @@ const convertDecimal128 = (value) => {
 };
 
 /**
- * Chuyển đổi room object cho frontend
+ * Format room object cho frontend
  */
-const formatRoom = (room) => ({
-    ...room.toObject(),
-    pricePerMonth: convertDecimal128(room.pricePerMonth),
-});
+const formatRoom = (room) => {
+  const obj = room.toObject();
+  return {
+    _id: obj._id,
+    roomNumber: obj.roomNumber,
+    type: obj.type,
+    pricePerMonth: convertDecimal128(obj.pricePerMonth),
+    areaM2: obj.areaM2,
+    floor: obj.floor,
+    district: obj.district,
+    status: obj.status,
+    image: obj.coverImageUrl || (obj.images?.[0]?.url || ""),
+    images: Array.isArray(obj.images) ? obj.images.map(i => i.url || "") : [],
+    createdAt: obj.createdAt,
+    updatedAt: obj.updatedAt || new Date().toISOString(),
+    currentContractSummary: obj.currentContractSummary
+      ? {
+          contractId: obj.currentContractSummary.contractId || "",
+          tenantName: obj.currentContractSummary.tenantName || "",
+          startDate: obj.currentContractSummary.startDate || "",
+          endDate: obj.currentContractSummary.endDate || "",
+          monthlyRent: convertDecimal128(obj.currentContractSummary.monthlyRent),
+        }
+      : undefined,
+  };
+};
 
 /**
  * Lấy tất cả phòng (có thể filter theo status/type)
