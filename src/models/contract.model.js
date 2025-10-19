@@ -6,7 +6,7 @@ const contractSchema = new Schema(
   {
     tenantId: {
       type: Schema.Types.ObjectId,
-      ref: "Tenant",
+      ref: "User",
       required: true,
     },
     roomId: {

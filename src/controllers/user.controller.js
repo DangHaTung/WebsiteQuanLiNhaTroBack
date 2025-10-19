@@ -19,20 +19,17 @@ export const getAllUsers = async (req, res) => {
     // Phân quyền dữ liệu theo role
     let selectFields = "fullName email phone role createdAt";
     
-    // Debug log
-    console.log("Debug getAllUsers - req.user:", req.user ? req.user.role : "No user");
-    console.log("Debug getAllUsers - req.user.role type:", typeof req.user?.role);
-    console.log("Debug getAllUsers - req.user.role === 'TENANT':", req.user?.role === 'TENANT');
+   
     
     // Nếu không có authentication (public access), chỉ hiển thị thông tin cơ bản
     if (!req.user) {
       selectFields = "fullName role createdAt";
-      console.log("Debug getAllUsers - Public access, selectFields:", selectFields);
+
     }
     // Nếu là TENANT, hiển thị thông tin cơ bản + phone
     else if (req.user.role === 'TENANT' || req.user.role === 'tenant') {
       selectFields = "fullName phone role createdAt";
-      console.log("Debug getAllUsers - TENANT access, selectFields:", selectFields);
+
     }
     else {
       console.log("Debug getAllUsers - Other role access, selectFields:", selectFields);
@@ -75,20 +72,17 @@ export const getUserById = async (req, res) => {
     // Phân quyền dữ liệu theo role
     let selectFields = "fullName email phone role createdAt";
     
-    // Debug log
-    console.log("Debug getUserById - req.user:", req.user ? req.user.role : "No user");
-    console.log("Debug getUserById - req.user.role type:", typeof req.user?.role);
-    console.log("Debug getUserById - req.user.role === 'TENANT':", req.user?.role === 'TENANT');
+
     
     // Nếu không có authentication (public access), chỉ hiển thị thông tin cơ bản
     if (!req.user) {
       selectFields = "fullName role createdAt";
-      console.log("Debug getUserById - Public access, selectFields:", selectFields);
+
     }
     // Nếu là TENANT, hiển thị thông tin cơ bản + phone
     else if (req.user.role === 'TENANT' || req.user.role === 'tenant') {
       selectFields = "fullName phone role createdAt";
-      console.log("Debug getUserById - TENANT access, selectFields:", selectFields);
+
     }
     else {
       console.log("Debug getUserById - Other role access, selectFields:", selectFields);

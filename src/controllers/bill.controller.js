@@ -1,5 +1,31 @@
 import Bill from "../models/bill.model.js";
 
+/**
+ * Helper convert Decimal128 sang number
+ */
+const convertDecimal128 = (value) => {
+    if (value === null || value === undefined) return null;
+    return parseFloat(value.toString());
+};
+
+/**
+ * Chuyển đổi bill object cho frontend
+ */
+const formatBill = (bill) => ({
+    ...bill.toObject(),
+    amountDue: convertDecimal128(bill.amountDue),
+    amountPaid: convertDecimal128(bill.amountPaid),
+    lineItems: bill.lineItems?.map(item => ({
+        ...item,
+        unitPrice: convertDecimal128(item.unitPrice),
+        lineTotal: convertDecimal128(item.lineTotal),
+    })) || [],
+    payments: bill.payments?.map(payment => ({
+        ...payment,
+        amount: convertDecimal128(payment.amount),
+    })) || [],
+});
+
 // Lấy danh sách hóa đơn
 export const getAllBills = async (req, res) => {
   try {
@@ -14,10 +40,13 @@ export const getAllBills = async (req, res) => {
 
     const total = await Bill.countDocuments();
 
+    // Format bills để chuyển đổi Decimal128 sang number
+    const formattedBills = bills.map(formatBill);
+
     res.status(200).json({
       message: "Lấy danh sách hóa đơn thành công",
       success: true,
-      data: bills,
+      data: formattedBills,
       pagination: {
         currentPage: parseInt(page),
         totalPages: Math.ceil(total / limit),
@@ -45,10 +74,13 @@ export const getBillById = async (req, res) => {
       });
     }
 
+    // Format bill để chuyển đổi Decimal128 sang number
+    const formattedBill = formatBill(bill);
+
     res.status(200).json({
       message: "Lấy hóa đơn thành công",
       success: true,
-      data: bill,
+      data: formattedBill,
     });
   } catch (err) {
     res.status(500).json({
@@ -64,10 +96,15 @@ export const createBill = async (req, res) => {
   try {
     const bill = new Bill(req.body);
     await bill.save();
+    
+    // Populate và format bill
+    const populatedBill = await Bill.findById(bill._id).populate("contractId");
+    const formattedBill = formatBill(populatedBill);
+    
     res.status(201).json({
       message: "Tạo hóa đơn thành công",
       success: true,
-      data: bill,
+      data: formattedBill,
     });
   } catch (err) {
     res.status(400).json({
@@ -81,17 +118,21 @@ export const createBill = async (req, res) => {
 // Cập nhật hóa đơn
 export const updateBill = async (req, res) => {
   try {
-    const bill = await Bill.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const bill = await Bill.findByIdAndUpdate(req.params.id, req.body, { new: true })
+      .populate("contractId");
     if (!bill)
       return res.status(404).json({
         message: "Không tìm thấy hóa đơn để cập nhật",
         success: false,
       });
 
+    // Format bill để chuyển đổi Decimal128 sang number
+    const formattedBill = formatBill(bill);
+
     res.status(200).json({
       message: "Cập nhật hóa đơn thành công",
       success: true,
-      data: bill,
+      data: formattedBill,
     });
   } catch (err) {
     res.status(400).json({
