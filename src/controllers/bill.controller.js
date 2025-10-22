@@ -4,26 +4,26 @@ import Bill from "../models/bill.model.js";
  * Helper convert Decimal128 sang number
  */
 const convertDecimal128 = (value) => {
-    if (value === null || value === undefined) return null;
-    return parseFloat(value.toString());
+  if (value === null || value === undefined) return null;
+  return parseFloat(value.toString());
 };
 
 /**
  * Chuyển đổi bill object cho frontend
  */
 const formatBill = (bill) => ({
-    ...bill.toObject(),
-    amountDue: convertDecimal128(bill.amountDue),
-    amountPaid: convertDecimal128(bill.amountPaid),
-    lineItems: bill.lineItems?.map(item => ({
-        ...item,
-        unitPrice: convertDecimal128(item.unitPrice),
-        lineTotal: convertDecimal128(item.lineTotal),
-    })) || [],
-    payments: bill.payments?.map(payment => ({
-        ...payment,
-        amount: convertDecimal128(payment.amount),
-    })) || [],
+  ...bill.toObject(),
+  amountDue: convertDecimal128(bill.amountDue),
+  amountPaid: convertDecimal128(bill.amountPaid),
+  lineItems: bill.lineItems?.map(item => ({
+    ...item,
+    unitPrice: convertDecimal128(item.unitPrice),
+    lineTotal: convertDecimal128(item.lineTotal),
+  })) || [],
+  payments: bill.payments?.map(payment => ({
+    ...payment,
+    amount: convertDecimal128(payment.amount),
+  })) || [],
 });
 
 // Lấy danh sách hóa đơn
@@ -67,6 +67,14 @@ export const getAllBills = async (req, res) => {
 export const getBillById = async (req, res) => {
   try {
     const bill = await Bill.findById(req.params.id).populate("contractId");
+    // const bill = await Bill.findById(billId)
+    //   .populate({
+    //     path: "contractId",
+    //     populate: {
+    //       path: "tenantId roomId", // lấy cả người thuê và phòng
+    //       select: "fullName phone email roomNumber" // chỉ lấy trường cần
+    //     }
+    //   });
     if (!bill) {
       return res.status(404).json({
         message: "Không tìm thấy hóa đơn",
@@ -96,11 +104,11 @@ export const createBill = async (req, res) => {
   try {
     const bill = new Bill(req.body);
     await bill.save();
-    
+
     // Populate và format bill
     const populatedBill = await Bill.findById(bill._id).populate("contractId");
     const formattedBill = formatBill(populatedBill);
-    
+
     res.status(201).json({
       message: "Tạo hóa đơn thành công",
       success: true,

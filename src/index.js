@@ -12,7 +12,7 @@ import roomRoute from "./routers/room.route.js";
 import userRoute from "./routers/user.route.js";
 import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
 import payRouter from "./routers/payment.route.js";
-
+import paymentZaloRoute from "./routers/payment.route.js"
 
 
 const app = express();
@@ -36,6 +36,7 @@ app.use("/api", roomRoute);
 app.use("/api", logRoute);
 app.use("/api", userRoute);
 app.use("/pay", payRouter);
+app.use("/api/payment", paymentZaloRoute)
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);
