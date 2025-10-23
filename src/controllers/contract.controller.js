@@ -11,16 +11,27 @@ const convertDecimal128 = (value) => {
 /**
  * Chuyển đổi contract object cho frontend
  */
-const formatContract = (contract) => ({
-    ...contract.toObject(),
+const formatContract = (contract) => {
+  const plain = contract.toObject();
+
+  // Convert Decimal128 của roomId nếu có
+  if (plain.roomId && plain.roomId.pricePerMonth) {
+    plain.roomId.pricePerMonth = convertDecimal128(plain.roomId.pricePerMonth);
+  }
+
+  return {
+    ...plain,
     deposit: convertDecimal128(contract.deposit),
     monthlyRent: convertDecimal128(contract.monthlyRent),
-    pricingSnapshot: contract.pricingSnapshot ? {
-        ...contract.pricingSnapshot,
-        monthlyRent: convertDecimal128(contract.pricingSnapshot.monthlyRent),
-        deposit: convertDecimal128(contract.pricingSnapshot.deposit),
-    } : undefined,
-});
+    pricingSnapshot: contract.pricingSnapshot
+      ? {
+          ...contract.pricingSnapshot,
+          monthlyRent: convertDecimal128(contract.pricingSnapshot.monthlyRent),
+          deposit: convertDecimal128(contract.pricingSnapshot.deposit),
+        }
+      : undefined,
+  };
+};
 
 // Lấy toàn bộ hợp đồng
 export const getAllContracts = async (req, res) => {
@@ -93,7 +104,7 @@ export const getContractById = async (req, res) => {
   try {
     const contract = await Contract.findById(req.params.id)
       .populate("tenantId", "fullName email phone")
-      .populate("roomId", "roomNumber pricePerMonth");
+      .populate("roomId", "roomNumber type status pricePerMonth areaM2 floor");
 
     if (!contract) {
       return res.status(404).json({
