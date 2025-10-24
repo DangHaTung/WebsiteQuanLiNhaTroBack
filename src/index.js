@@ -50,6 +50,10 @@ mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {
     console.log("✅ Kết nối MongoDB thành công");
+    const conn = mongoose.connection;
+    const info = conn?.host ? `${conn.host}:${conn?.port}` : 'unknown-host';
+    // In ra thông tin DB để đối chiếu với Compass
+    console.log(`📦 Đang dùng DB: ${conn.name} @ ${info}`);
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
       console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`);

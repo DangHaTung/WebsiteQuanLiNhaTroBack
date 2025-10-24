@@ -1,18 +1,31 @@
  import Complaint from "../models/complaint.model.js";
  
- // Tạo complaint mới
+ 
  export const createComplaint = async (req, res) => {
-    try {
-        const complaint = new Complaint(req.body);
-        await complaint.save();
-        res.status(201).json({
-            message: "Tạo complaint thành công",
-            success: true,
-            data: complaint,
-        });
-    } catch (error) {
-        res.status(500).json({ message: "Lỗi khi tạo complaint", success: false, error: error.message });
-    }
+   try {
+      const { tenantId, title, description, adminNote } = req.body || {};
+      // debug log tối thiểu để kiểm tra payload thực tế
+      console.log("[createComplaint] payload:", { tenantId, title, description, adminNote });
+
+      const safeTitle = typeof title === 'string' ? title.trim() : '';
+      const safeDesc = typeof description === 'string' ? description.trim() : '';
+      if (!safeTitle || safeTitle.length < 3) {
+          return res.status(400).json({ success: false, message: 'Tiêu đề không hợp lệ (tối thiểu 3 ký tự)' });
+      }
+      if (!safeDesc || safeDesc.length < 10) {
+          return res.status(400).json({ success: false, message: 'Mô tả không hợp lệ (tối thiểu 10 ký tự)' });
+      }
+
+      const complaint = new Complaint({ tenantId, title: safeTitle, description: safeDesc, adminNote });
+       await complaint.save();
+       res.status(201).json({
+           message: "Tạo complaint thành công",
+           success: true,
+           data: complaint,
+       });
+   } catch (error) {
+       res.status(500).json({ message: "Lỗi khi tạo complaint", success: false, error: error.message });
+   }
  }
  // Lấy danh sách complaint
  export const getAllComplaints = async (req, res) => {

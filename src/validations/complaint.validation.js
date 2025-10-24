@@ -7,7 +7,13 @@ export const createComplaintSchema = Joi.object({
     "string.length": "ID tenant phải có đúng 24 ký tự",
   }),
 
-  description: Joi.string().min(10).max(1000).required().messages({
+  title: Joi.string().trim().min(3).max(200).required().messages({
+    "string.empty": "Tiêu đề không được bỏ trống",
+    "string.min": "Tiêu đề phải có ít nhất 3 ký tự",
+    "string.max": "Tiêu đề không được vượt quá 200 ký tự",
+  }),
+
+  description: Joi.string().trim().min(10).max(1000).required().messages({
     "string.empty": "Mô tả complaint không được bỏ trống",
     "string.min": "Mô tả complaint phải có ít nhất 10 ký tự",
     "string.max": "Mô tả complaint không được vượt quá 1000 ký tự",
