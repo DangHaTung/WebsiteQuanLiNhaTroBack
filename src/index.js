@@ -9,6 +9,10 @@ import tenantRoute from "./routers/tenant.route.js"; // import thêm route tenan
 import contractRoute from "./routers/contract.route.js"; // import thêm route contract
 import logRoute from "./routers/log.route.js"; // import thêm route log
 import roomRoute from "./routers/room.route.js";
+import roomPublicRoute from "./routers/room.public.route.js"; // PUBLIC room routes
+import billPublicRoute from "./routers/bill.public.route.js"; // PUBLIC bill routes
+import contractPublicRoute from "./routers/contract.public.route.js"; // PUBLIC contract routes
+import tenantPublicRoute from "./routers/tenant.public.route.js"; // PUBLIC tenant routes
 import userRoute from "./routers/user.route.js";
 import complaintRoute from "./routers/complaint.route.js"; // import thêm route complaint
 import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
@@ -29,11 +33,18 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Đăng ký route
+// QUAN TRỌNG: Đăng ký PUBLIC routes TRƯỚC các route có middleware
+app.use("/api", roomPublicRoute);      // /rooms/public
+app.use("/api", billPublicRoute);      // /bills/my-bills
+app.use("/api", contractPublicRoute);  // /contracts/my-contracts
+app.use("/api", tenantPublicRoute);    // /tennant, /tennant/my-tenant
+
+// Đăng ký PROTECTED routes (cần auth)
 app.use("/api", authRoute);
-app.use("/api", tenantRoute);
-app.use("/api", billRoute);
-app.use("/api", contractRoute);
-app.use("/api", roomRoute);
+app.use("/api", tenantRoute);   // ADMIN tenant routes
+app.use("/api", billRoute);     // ADMIN bill routes
+app.use("/api", contractRoute); // ADMIN contract routes
+app.use("/api", roomRoute);     // ADMIN room routes
 app.use("/api", logRoute);
 app.use("/api", userRoute);
 app.use("/api", complaintRoute);
