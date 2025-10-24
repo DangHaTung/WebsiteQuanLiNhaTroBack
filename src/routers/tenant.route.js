@@ -21,17 +21,12 @@ import { asyncHandler } from "../middleware/error.middleware.js";
 
 const router = express.Router();
 
-// Tất cả route đều cần xác thực
-router.use(authenticateToken);
-
-// Chỉ ADMIN và STAFF mới có thể quản lý tenants
-router.use(authorize('ADMIN', 'STAFF'));
-
-router.get("/tennant", validatePagination(), asyncHandler(getAllTenants));
-router.get("/tennant/:id", validateParams(tenantParamsSchema), asyncHandler(getTenantById));
-router.post("/tennant", validateBody(createTenantSchema), asyncHandler(createTenant));
-router.put("/tennant/:id", validateParams(tenantParamsSchema), validateBody(updateTenantSchema), asyncHandler(updateTenant));
-router.delete("/tennant/:id", validateParams(tenantParamsSchema), asyncHandler(deleteTenant));
+// ===== PROTECTED ROUTES - CẦN ADMIN/STAFF =====
+// Public routes đã được tách ra file riêng: tenant.public.route.js
+router.get("/tennant", authenticateToken, authorize('ADMIN', 'STAFF'), validatePagination(), asyncHandler(getAllTenants));
+router.get("/tennant/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(tenantParamsSchema), asyncHandler(getTenantById));
+router.put("/tennant/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(tenantParamsSchema), validateBody(updateTenantSchema), asyncHandler(updateTenant));
+router.delete("/tennant/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(tenantParamsSchema), asyncHandler(deleteTenant));
 
 export default router;
     

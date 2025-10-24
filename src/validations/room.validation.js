@@ -311,4 +311,26 @@ export const roomQuerySchema = Joi.object({
     .messages({
       'string.max': 'Query không được vượt quá 100 ký tự',
     }),
+
+  page: Joi.number()
+    .integer()
+    .min(1)
+    .optional()
+    .messages({
+      'number.base': 'Page phải là số',
+      'number.integer': 'Page phải là số nguyên',
+      'number.min': 'Page phải lớn hơn hoặc bằng 1',
+    }),
+
+  limit: Joi.number()
+    .integer()
+    .min(1)
+    .max(100)
+    .optional()
+    .messages({
+      'number.base': 'Limit phải là số',
+      'number.integer': 'Limit phải là số nguyên',
+      'number.min': 'Limit phải lớn hơn hoặc bằng 1',
+      'number.max': 'Limit không được vượt quá 100',
+    }),
 });

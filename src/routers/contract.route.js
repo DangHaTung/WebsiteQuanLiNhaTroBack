@@ -5,6 +5,7 @@ import {
   getContractById,
   updateContract,
   deleteContract,
+  getMyContracts,
 } from "../controllers/contract.controller.js";
 import { 
   createContractSchema, 
@@ -21,16 +22,12 @@ import { asyncHandler } from "../middleware/error.middleware.js";
 
 const router = express.Router();
 
-// Tất cả route đều cần xác thực
-router.use(authenticateToken);
-
-// Chỉ ADMIN và STAFF mới có thể quản lý contracts
-router.use(authorize('ADMIN', 'STAFF'));
-
-router.get("/contracts", validatePagination(), asyncHandler(getAllContracts));
-router.post("/contracts", validateBody(createContractSchema), asyncHandler(createContract));
-router.get("/contracts/:id", validateParams(contractParamsSchema), asyncHandler(getContractById));
-router.put("/contracts/:id", validateParams(contractParamsSchema), validateBody(updateContractSchema), asyncHandler(updateContract));
-router.delete("/contracts/:id", validateParams(contractParamsSchema), asyncHandler(deleteContract));
+// ===== PROTECTED ROUTES - CẦN ADMIN/STAFF =====
+// Public routes đã được tách ra file riêng: contract.public.route.js
+router.get("/contracts", authenticateToken, authorize('ADMIN', 'STAFF'), validatePagination(), asyncHandler(getAllContracts));
+router.post("/contracts", authenticateToken, authorize('ADMIN', 'STAFF'), validateBody(createContractSchema), asyncHandler(createContract));
+router.get("/contracts/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(contractParamsSchema), asyncHandler(getContractById));
+router.put("/contracts/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(contractParamsSchema), validateBody(updateContractSchema), asyncHandler(updateContract));
+router.delete("/contracts/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(contractParamsSchema), asyncHandler(deleteContract));
 
 export default router;

@@ -22,7 +22,46 @@ const formatContract = (contract) => ({
     } : undefined,
 });
 
-// Lấy toàn bộ hợp đồng
+// Lấy danh sách hợp đồng của user hiện tại
+export const getMyContracts = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (page - 1) * limit;
+    const userId = req.user._id;
+
+    const contracts = await Contract.find({ tenantId: userId })
+      .populate("tenantId", "fullName email phone")
+      .populate("roomId", "roomNumber pricePerMonth")
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .skip(skip);
+
+    const total = await Contract.countDocuments({ tenantId: userId });
+
+    // Format contracts để chuyển đổi Decimal128 sang number
+    const formattedContracts = contracts.map(formatContract);
+
+    res.status(200).json({
+      success: true,
+      message: "Lấy danh sách hợp đồng thành công",
+      data: formattedContracts,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalRecords: total,
+        limit: parseInt(limit),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Lỗi khi lấy danh sách hợp đồng",
+      success: false,
+      error: err.message,
+    });
+  }
+};
+
+// Lấy toàn bộ hợp đồng (admin)
 export const getAllContracts = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
