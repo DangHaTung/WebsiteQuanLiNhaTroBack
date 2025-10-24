@@ -1,4 +1,5 @@
 import Bill from "../models/bill.model.js";
+import Contract from "../models/contract.model.js";
 
 /**
  * Helper convert Decimal128 sang number
@@ -26,7 +27,54 @@ const formatBill = (bill) => ({
     })) || [],
 });
 
-// Lấy danh sách hóa đơn
+// Lấy danh sách hóa đơn của user hiện tại
+export const getMyBills = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (page - 1) * limit;
+    const userId = req.user._id;
+
+    // Tìm bills thông qua contracts của user
+    const bills = await Bill.find()
+      .populate({
+        path: "contractId",
+        match: { tenantId: userId }
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .skip(skip);
+
+    // Lọc ra những bills có contractId hợp lệ
+    const validBills = bills.filter(bill => bill.contractId);
+
+    const total = await Bill.countDocuments({
+      contractId: { $in: await Contract.find({ tenantId: userId }).select('_id') }
+    });
+
+    // Format bills để chuyển đổi Decimal128 sang number
+    const formattedBills = validBills.map(formatBill);
+
+    res.status(200).json({
+      message: "Lấy danh sách hóa đơn thành công",
+      success: true,
+      data: formattedBills,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalRecords: total,
+        limit: parseInt(limit),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Lỗi khi lấy danh sách hóa đơn",
+      success: false,
+      error: err.message,
+    });
+  }
+};
+
+// Lấy danh sách hóa đơn (admin)
 export const getAllBills = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
