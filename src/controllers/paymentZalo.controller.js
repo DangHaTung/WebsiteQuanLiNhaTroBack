@@ -10,7 +10,7 @@ const config = {
   key2: "trMrHtvjo6myautxDUiAcYsVtaeQ8nhf",
   endpoint: "https://sb-openapi.zalopay.vn/v2/create",
   queryEndpoint: "https://sb-openapi.zalopay.vn/v2/query",
-  callback_url: "https://example.com/callback",
+  callback_url: "http://localhost:3000/api/payment/zalopay/callback", // Cập nhật URL callback thực tế
 };
 
 // ==============================
@@ -21,18 +21,19 @@ export const createZaloOrder = async (req, res) => {
     const { billId } = req.body;
     if (!billId) return res.status(400).json({ message: "Missing billId" });
 
-    const bill = await Bill.findById(billId)
-      .populate({
-        path: "contractId",
-        populate: [
-          { path: "tenantId", select: "fullName email phone" },
-          { path: "roomId", select: "roomNumber" },
-        ],
-      });
+    const bill = await Bill.findById(billId).populate({
+      path: "contractId",
+      populate: [
+        { path: "tenantId", select: "fullName email phone" },
+        { path: "roomId", select: "roomNumber" },
+      ],
+    });
 
     if (!bill || !bill.contractId || !bill.contractId.tenantId) {
       console.error("❌ Missing tenant data for bill:", billId);
-      return res.status(400).json({ message: "Hợp đồng hoặc người thuê không tồn tại" });
+      return res
+        .status(400)
+        .json({ message: "Hợp đồng hoặc người thuê không tồn tại" });
     }
 
     const transID = Math.floor(Math.random() * 1000000);
@@ -44,7 +45,8 @@ export const createZaloOrder = async (req, res) => {
     const items = [
       {
         itemid: billId,
-        itemname: "Thanh toán hóa đơn phòng " + bill.contractId.roomId.roomNumber,
+        itemname:
+          "Thanh toán hóa đơn phòng " + bill.contractId.roomId.roomNumber,
         itemprice: Math.round(Number(bill.amountDue)),
         itemquantity: 1,
       },
@@ -96,7 +98,10 @@ export const createZaloOrder = async (req, res) => {
       zaloData: zaloRes.data,
     });
   } catch (error) {
-    console.error("ZaloPay create order error:", error.response?.data || error.message);
+    console.error(
+      "ZaloPay create order error:",
+      error.response?.data || error.message
+    );
     res.status(500).json({
       message: "Create ZaloPay order failed",
       error: error.response?.data || error.message,
@@ -159,7 +164,8 @@ export const zaloCallback = async (req, res) => {
 export const queryZaloOrder = async (req, res) => {
   try {
     const { app_trans_id } = req.body;
-    if (!app_trans_id) return res.status(400).json({ message: "Missing app_trans_id" });
+    if (!app_trans_id)
+      return res.status(400).json({ message: "Missing app_trans_id" });
 
     const data = config.app_id + "|" + app_trans_id + "|" + config.key1;
     const mac = CryptoJS.HmacSHA256(data, config.key1).toString();
@@ -178,8 +184,74 @@ export const queryZaloOrder = async (req, res) => {
   }
 };
 
+// ==============================
+// Kiểm tra trạng thái Payment trong database
+// ==============================
+export const checkPaymentStatus = async (req, res) => {
+  try {
+    const { billId, transactionId } = req.query;
+
+    if (!billId && !transactionId) {
+      return res
+        .status(400)
+        .json({ message: "Missing billId or transactionId" });
+    }
+
+    let query = { provider: "ZALOPAY" };
+    if (billId) query.billId = billId;
+    if (transactionId) query.transactionId = transactionId;
+
+    const payment = await Payment.findOne(query).populate({
+      path: "billId",
+      populate: {
+        path: "contractId",
+        populate: [
+          { path: "tenantId", select: "fullName email phone" },
+          { path: "roomId", select: "roomNumber" },
+        ],
+      },
+    });
+
+    if (!payment) {
+      return res.status(404).json({ message: "Payment not found" });
+    }
+
+    return res.json({
+      payment: {
+        _id: payment._id,
+        billId: payment.billId,
+        transactionId: payment.transactionId,
+        amount: payment.amount.toString(),
+        status: payment.status,
+        createdAt: payment.createdAt,
+        updatedAt: payment.updatedAt,
+        bill: payment.billId
+          ? {
+              _id: payment.billId._id,
+              status: payment.billId.status,
+              amountDue: payment.billId.amountDue.toString(),
+              contract: payment.billId.contractId
+                ? {
+                    _id: payment.billId.contractId._id,
+                    tenant: payment.billId.contractId.tenantId,
+                    room: payment.billId.contractId.roomId,
+                  }
+                : null,
+            }
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error("Check payment status error:", error);
+    res
+      .status(500)
+      .json({ message: "Check payment status failed", error: error.message });
+  }
+};
+
 export default {
   createZaloOrder,
   zaloCallback,
-  queryZaloOrder
-}
+  queryZaloOrder,
+  checkPaymentStatus,
+};
