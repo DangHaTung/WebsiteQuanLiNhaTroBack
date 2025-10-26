@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Bill from "../models/bill.model.js";
 import Contract from "../models/contract.model.js";
 
@@ -166,16 +167,81 @@ export const createBill = async (req, res) => {
 // Cập nhật hóa đơn
 export const updateBill = async (req, res) => {
   try {
-    const bill = await Bill.findByIdAndUpdate(req.params.id, req.body, { new: true })
-      .populate("contractId");
-    if (!bill)
+    // Lấy hóa đơn hiện tại để kiểm tra trạng thái
+    const current = await Bill.findById(req.params.id).populate("contractId");
+    if (!current) {
       return res.status(404).json({
         message: "Không tìm thấy hóa đơn để cập nhật",
         success: false,
       });
+    }
+
+    // Nếu đã thanh toán, không cho phép chuyển về trạng thái khác (UNPAID/PARTIALLY_PAID/VOID)
+    const incomingStatus = req.body?.status;
+    if (current.status === "PAID" && incomingStatus && incomingStatus !== "PAID") {
+      return res.status(400).json({
+        message: "Hóa đơn đã thanh toán, không thể chuyển về trạng thái khác hoặc hủy",
+        success: false,
+      });
+    }
+
+    // Nếu đang PARTIALLY_PAID, không cho phép chuyển về UNPAID hoặc VOID (có thể chuyển lên PAID)
+    if (current.status === "PARTIALLY_PAID" && incomingStatus && ["UNPAID", "VOID"].includes(incomingStatus)) {
+      return res.status(400).json({
+        message: "Hóa đơn đã thanh toán một phần, không thể chuyển về chưa thanh toán hoặc hủy",
+        success: false,
+      });
+    }
+
+    // Hàm tiện ích lấy số từ Decimal128 hoặc null -> số
+    const toNumberSafe = (val) => {
+      const n = convertDecimal128(val);
+      return n === null ? 0 : n;
+    };
+
+    // Chuẩn bị object cập nhật dựa trên body (chỉ override những field client muốn)
+    const updateFields = { ...req.body };
+
+    // Nếu incoming status là PAID và hóa đơn hiện tại chưa ở PAID => chuyển tiền amountDue -> amountPaid
+    if (incomingStatus === "PAID" && current.status !== "PAID") {
+      const currentAmountDue = toNumberSafe(current.amountDue);
+      const currentAmountPaid = toNumberSafe(current.amountPaid);
+
+      if (currentAmountDue > 0) {
+        const transferred = currentAmountDue;
+        const finalAmountPaid = currentAmountPaid + transferred;
+
+        // Ghi lại dưới dạng Decimal128
+        updateFields.amountPaid = mongoose.Types.Decimal128.fromString(String(finalAmountPaid));
+        updateFields.amountDue = mongoose.Types.Decimal128.fromString("0");
+
+        // Tạo bản ghi payment tự động
+        const autoPayment = {
+          paidAt: new Date(),
+          amount: mongoose.Types.Decimal128.fromString(String(transferred)),
+          method: "OTHER",
+          provider: "AUTO",
+          transactionId: `auto-${Date.now()}`,
+          note: "Auto transfer amountDue -> amountPaid when status set to PAID",
+        };
+
+        // Merge payments hiện tại + autoPayment
+        updateFields.payments = [...(current.payments || []), autoPayment];
+      } else {
+        // Nếu amountDue = 0 trước đó, vẫn đảm bảo amountDue = 0 và amountPaid không thay đổi (hoặc set bằng giá trị hiện tại)
+        updateFields.amountDue = mongoose.Types.Decimal128.fromString("0");
+        updateFields.amountPaid = mongoose.Types.Decimal128.fromString(String(currentAmountPaid));
+      }
+    }
+
+    // Cập nhật updatedAt (pre save không chạy cho findByIdAndUpdate)
+    updateFields.updatedAt = new Date();
+
+    // Thực hiện cập nhật an toàn
+    const updated = await Bill.findByIdAndUpdate(req.params.id, updateFields, { new: true }).populate("contractId");
 
     // Format bill để chuyển đổi Decimal128 sang number
-    const formattedBill = formatBill(bill);
+    const formattedBill = formatBill(updated);
 
     res.status(200).json({
       message: "Cập nhật hóa đơn thành công",
@@ -183,6 +249,7 @@ export const updateBill = async (req, res) => {
       data: formattedBill,
     });
   } catch (err) {
+    console.error("updateBill error:", err);
     res.status(400).json({
       message: "Không thể cập nhật hóa đơn",
       success: false,
@@ -194,12 +261,21 @@ export const updateBill = async (req, res) => {
 // Xóa hóa đơn
 export const deleteBill = async (req, res) => {
   try {
-    const bill = await Bill.findByIdAndDelete(req.params.id);
-    if (!bill)
+    const bill = await Bill.findById(req.params.id);
+    if (!bill) {
       return res.status(404).json({
         message: "Không tìm thấy hóa đơn để xóa",
         success: false,
       });
+    }
+    if (bill.status === "PAID" || bill.status === "PARTIALLY_PAID") {
+      return res.status(400).json({
+        message: "Hóa đơn đã thanh toán hoặc thanh toán một phần, không thể xóa",
+        success: false,
+      });
+    }
+
+    await Bill.findByIdAndDelete(req.params.id);
 
     res.status(200).json({
       message: "Xóa hóa đơn thành công",

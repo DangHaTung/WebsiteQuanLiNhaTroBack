@@ -17,6 +17,7 @@ import userRoute from "./routers/user.route.js";
 import complaintRoute from "./routers/complaint.route.js"; // import thêm route complaint
 import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
 import payRouter from "./routers/payment.route.js";
+import checkinPublicRoute from "./routers/checkin.public.route.js"; // PUBLIC checkin routes
 
 
 
@@ -38,6 +39,7 @@ app.use("/api", roomPublicRoute);      // /rooms/public
 app.use("/api", billPublicRoute);      // /bills/my-bills
 app.use("/api", contractPublicRoute);  // /contracts/my-contracts
 app.use("/api", tenantPublicRoute);    // /tennant, /tennant/my-tenant
+app.use("/api", checkinPublicRoute);   // /checkin/cash
 
 // Đăng ký PROTECTED routes (cần auth)
 app.use("/api", authRoute);
