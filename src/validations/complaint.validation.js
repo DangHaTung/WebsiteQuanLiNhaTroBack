@@ -38,6 +38,30 @@ export const updateComplaintStatusSchema = Joi.object({
   }),
 });
 
+// Custom validation middleware to prevent invalid transitions
+export const forbidInvalidStatusTransition = (req, res, next) => {
+  try {
+    const nextStatus = String(req.body?.status || "").toUpperCase();
+    const currentStatus = String(req.body?.currentStatus || "").toUpperCase();
+    // If caller provides currentStatus, do a quick guard here too
+    if (currentStatus === "RESOLVED" && nextStatus !== "RESOLVED") {
+      return res.status(400).json({
+        success: false,
+        message: "Khiếu nại đã được xử lý, không thể chuyển về trạng thái trước đó",
+      });
+    }
+    if (currentStatus === "IN_PROGRESS" && nextStatus === "PENDING") {
+      return res.status(400).json({
+        success: false,
+        message: "Khiếu nại đang xử lý, không thể chuyển về trạng thái Chờ xử lý",
+      });
+    }
+    return next();
+  } catch (e) {
+    return next();
+  }
+};
+
 export const complaintIdSchema = Joi.object({
   id: Joi.string().hex().length(24).required().messages({
     "string.empty": "ID complaint không được bỏ trống",

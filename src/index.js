@@ -14,7 +14,9 @@ import billPublicRoute from "./routers/bill.public.route.js"; // PUBLIC bill rou
 import contractPublicRoute from "./routers/contract.public.route.js"; // PUBLIC contract routes
 import tenantPublicRoute from "./routers/tenant.public.route.js"; // PUBLIC tenant routes
 import userRoute from "./routers/user.route.js";
-import complaintRoute from "./routers/complaint.route.js"; // import thêm route complaint
+import complaintRoute from "./routers/complaint.route.js"; // ADMIN complaint routes
+import complaintPublicRoute from "./routers/complaint.public.route.js"; // PUBLIC complaint routes
+import notificationRoute from "./routers/notification.route.js"; // Notification routes
 import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
 import payRouter from "./routers/payment.route.js";
 
@@ -38,6 +40,7 @@ app.use("/api", roomPublicRoute);      // /rooms/public
 app.use("/api", billPublicRoute);      // /bills/my-bills
 app.use("/api", contractPublicRoute);  // /contracts/my-contracts
 app.use("/api", tenantPublicRoute);    // /tennant, /tennant/my-tenant
+app.use("/api/complaints", complaintPublicRoute); // PUBLIC complaint routes (khách hàng)
 
 // Đăng ký PROTECTED routes (cần auth)
 app.use("/api", authRoute);
@@ -47,7 +50,8 @@ app.use("/api", contractRoute); // ADMIN contract routes
 app.use("/api", roomRoute);     // ADMIN room routes
 app.use("/api", logRoute);
 app.use("/api", userRoute);
-app.use("/api", complaintRoute);
+app.use("/api/admin/complaints", complaintRoute); // ADMIN complaint routes
+app.use("/api/notifications", notificationRoute); // Notification routes
 app.use("/pay", payRouter);
 
 // Middleware xử lý route không tồn tại
