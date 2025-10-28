@@ -205,6 +205,13 @@ export const updateContract = async (req, res) => {
 // Xóa hợp đồng
 export const deleteContract = async (req, res) => {
   try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(403).json({
+        success: false,
+        message: "Bạn không có quyền xóa hợp đồng.",
+      });
+    }
+
     const contract = await Contract.findByIdAndDelete(req.params.id);
 
     if (!contract) {
