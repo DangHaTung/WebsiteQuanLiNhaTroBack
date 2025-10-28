@@ -261,6 +261,13 @@ export const updateBill = async (req, res) => {
 // Xóa hóa đơn
 export const deleteBill = async (req, res) => {
   try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(403).json({
+        message: "Bạn không có quyền xóa hóa đơn.",
+        success: false,
+      });
+    }
+
     const bill = await Bill.findById(req.params.id);
     if (!bill) {
       return res.status(404).json({

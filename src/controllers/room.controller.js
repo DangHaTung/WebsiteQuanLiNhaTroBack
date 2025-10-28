@@ -277,6 +277,13 @@ export const updateRoom = async (req, res) => {
  */
 export const deleteRoom = async (req, res) => {
     try {
+        if (!req.user || req.user.role !== "ADMIN") {
+            return res.status(403).json({
+                message: "Bạn không có quyền xóa phòng.",
+                success: false,
+            });
+        }
+
         const { id } = req.params;
         if (!mongoose.isValidObjectId(id))
             return res.status(400).json({ 

@@ -4,6 +4,10 @@ import User from "../models/user.model.js";
 // Lấy danh sách người dùng (hỗ trợ phân trang, lọc role, tìm kiếm keyword)
 export const getAllUsers = async (req, res) => {
   try {
+    if (!req.user || req.user.role.toUpperCase() !== "ADMIN") {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền truy cập danh sách người dùng" });
+    }
+
     const { page = 1, limit = 10, role, keyword } = req.query;
     const numericLimit = Math.max(parseInt(limit, 10) || 10, 1);
     const numericPage = Math.max(parseInt(page, 10) || 1, 1);
@@ -186,6 +190,10 @@ export const updateUser = async (req, res) => {
 // Xóa người dùng
 export const deleteUser = async (req, res) => {
   try {
+    if (!req.user || req.user.role.toUpperCase() !== "ADMIN") {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền xóa người dùng" });
+    }
+
     const { id } = req.params;
     const deleted = await User.findByIdAndDelete(id);
     if (!deleted) {
