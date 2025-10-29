@@ -1,5 +1,4 @@
 import Complaint from "../models/complaint.model.js";
-import Notification from "../models/notification.model.js";
 import User from "../models/user.model.js";
 
 // Tạo complaint mới
@@ -28,26 +27,6 @@ export const createComplaint = async (req, res) => {
 
     await complaint.save();
 
-    // Tạo notification cho tất cả admin
-    try {
-      const admins = await User.find({ role: "ADMIN" }).select("_id");
-      if (admins && admins.length > 0) {
-        const notifications = admins.map((admin) => ({
-          recipientId: admin._id,
-          recipientRole: "ADMIN",
-          type: "COMPLAINT_NEW",
-          title: "Complaint mới",
-          message: `Có complaint mới từ tenant: ${safeTitle}`,
-          relatedEntityId: complaint._id,
-          relatedEntityType: "Complaint",
-        }));
-        await Notification.insertMany(notifications);
-        console.log(`✅ Đã tạo ${notifications.length} notifications cho admin`);
-      }
-    } catch (notifError) {
-      console.error("[createComplaint] notification error:", notifError);
-      // Không fail toàn bộ request nếu notification lỗi
-    }
 
     return res.status(201).json({
       success: true,
