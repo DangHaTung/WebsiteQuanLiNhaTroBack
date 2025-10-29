@@ -18,25 +18,21 @@ import qs from "qs";
  */
 
 // Basic config loaded from env
-const tmnCode = (process.env.VNP_TMNCODE || "").trim();
-const secretKeyRaw = process.env.VNP_HASHSECRET || "";
+const tmnCode = (process.env.VNP_TMNCODE || "DEMO_TMN_CODE").trim();
+const secretKeyRaw = process.env.VNP_HASHSECRET || "DEMO_HASH_SECRET";
 const secretKey = secretKeyRaw && secretKeyRaw.trim();
 const vnpUrl = process.env.VNP_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-const vnpReturnUrl = process.env.VNP_RETURN_URL || "";
+const vnpReturnUrl = process.env.VNP_RETURN_URL || "http://localhost:3000/pay/vnpay-return";
 const multiply100 = String(process.env.VNP_MULTIPLY_100 || "").toLowerCase() === "true";
 const secureHashType = (process.env.VNP_SECURE_HASH_TYPE || "HMACSHA512").toUpperCase();
 const debug = String(process.env.VNP_DEBUG || "").toLowerCase() === "true";
 
-// Fail fast: require key pieces
-if (!tmnCode) {
-  throw new Error("VNP_TMNCODE not defined in environment");
+// Warning for missing environment variables
+if (tmnCode === "DEMO_TMN_CODE") {
+  console.warn("⚠️  Warning: VNP_TMNCODE not defined in environment. Using demo value.");
 }
-if (!secretKey) {
-  throw new Error("VNP_HASHSECRET not defined in environment");
-}
-if (!vnpReturnUrl) {
-  // Not fatal but warn
-  console.warn("Warning: VNP_RETURN_URL not defined. VNPay return URL may be incorrect.");
+if (secretKey === "DEMO_HASHSECRET") {
+  console.warn("⚠️  Warning: VNP_HASHSECRET not defined in environment. Using demo value.");
 }
 
 // Map secureHashType to algorithm

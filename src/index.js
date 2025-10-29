@@ -59,8 +59,9 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Kết nối MongoDB
+const mongoUri = process.env.MONGO_URI || "mongodb://localhost:27017/rental_management";
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(mongoUri)
   .then(() => {
     console.log("✅ Kết nối MongoDB thành công");
     const PORT = process.env.PORT || 3000;
