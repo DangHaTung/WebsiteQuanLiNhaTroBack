@@ -275,9 +275,9 @@ export const deleteBill = async (req, res) => {
         success: false,
       });
     }
-    if (bill.status === "PAID" || bill.status === "PARTIALLY_PAID") {
+    if (bill.status === "UNPAID" || bill.status === "PARTIALLY_PAID") {
       return res.status(400).json({
-        message: "Hóa đơn đã thanh toán hoặc thanh toán một phần, không thể xóa",
+        message: "Hóa đơn chưa thanh toán hoặc thanh toán một phần, không thể xóa",
         success: false,
       });
     }
