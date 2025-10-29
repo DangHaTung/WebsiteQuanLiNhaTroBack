@@ -8,6 +8,17 @@ const complaintSchema = new Schema({
         ref: "Tenant",
         required: true,
     },
+    createdBy: {
+        type: Schema.Types.ObjectId,
+        ref: "User", // tài khoản khách hàng tạo khiếu nại
+        required: true,
+    },
+    title: {
+        type: String,
+        required: true,
+        trim: true,
+        maxlength: 200,
+    },
     description: {
         type: String,
         required: true,

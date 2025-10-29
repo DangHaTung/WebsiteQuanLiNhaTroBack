@@ -14,7 +14,8 @@ import billPublicRoute from "./routers/bill.public.route.js"; // PUBLIC bill rou
 import contractPublicRoute from "./routers/contract.public.route.js"; // PUBLIC contract routes
 import tenantPublicRoute from "./routers/tenant.public.route.js"; // PUBLIC tenant routes
 import userRoute from "./routers/user.route.js";
-import complaintRoute from "./routers/complaint.route.js"; // import thêm route complaint
+import complaintRoute from "./routers/complaint.route.js"; // ADMIN complaint routes
+import complaintPublicRoute from "./routers/complaint.public.route.js"; // PUBLIC complaint routes
 import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
 import payRouter from "./routers/payment.route.js";
 import checkinPublicRoute from "./routers/checkin.public.route.js"; // PUBLIC checkin routes
@@ -40,6 +41,7 @@ app.use("/api", billPublicRoute);      // /bills/my-bills
 app.use("/api", contractPublicRoute);  // /contracts/my-contracts
 app.use("/api", tenantPublicRoute);    // /tennant, /tennant/my-tenant
 app.use("/api", checkinPublicRoute);   // /checkin/cash
+app.use("/api/complaints", complaintPublicRoute); // PUBLIC complaint routes
 
 // Đăng ký PROTECTED routes (cần auth)
 app.use("/api", authRoute);
@@ -48,8 +50,9 @@ app.use("/api", billRoute);     // ADMIN bill routes
 app.use("/api", contractRoute); // ADMIN contract routes
 app.use("/api", roomRoute);     // ADMIN room routes
 app.use("/api", logRoute);
+
 app.use("/api", userRoute);
-app.use("/api", complaintRoute);
+app.use("/api/admin/complaints", complaintRoute); // ADMIN complaint routes
 app.use("/pay", payRouter);
 
 // Middleware xử lý route không tồn tại
@@ -59,10 +62,15 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Kết nối MongoDB
+const mongoUri = process.env.MONGO_URI || "mongodb://localhost:27017/rental_management";
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(mongoUri)
   .then(() => {
     console.log("✅ Kết nối MongoDB thành công");
+    const conn = mongoose.connection;
+    const info = conn?.host ? `${conn.host}:${conn?.port}` : 'unknown-host';
+    // In ra thông tin DB để đối chiếu với Compass
+    console.log(`📦 Đang dùng DB: ${conn.name} @ ${info}`);
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
       console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`);
