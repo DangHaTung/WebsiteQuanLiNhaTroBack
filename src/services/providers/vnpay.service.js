@@ -22,7 +22,7 @@ const tmnCode = (process.env.VNP_TMNCODE || "DEMO_TMN_CODE").trim();
 const secretKeyRaw = process.env.VNP_HASHSECRET || "DEMO_HASH_SECRET";
 const secretKey = secretKeyRaw && secretKeyRaw.trim();
 const vnpUrl = process.env.VNP_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-const vnpReturnUrl = process.env.VNP_RETURN_URL || "http://localhost:3000/pay/vnpay-return";
+const vnpReturnUrl = process.env.VNP_RETURN_URL || "http://localhost:3000/payment/vnpay-return";
 const multiply100 = String(process.env.VNP_MULTIPLY_100 || "").toLowerCase() === "true";
 const secureHashType = (process.env.VNP_SECURE_HASH_TYPE || "HMACSHA512").toUpperCase();
 const debug = String(process.env.VNP_DEBUG || "").toLowerCase() === "true";

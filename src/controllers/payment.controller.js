@@ -14,115 +14,117 @@ function decToNumber(dec) {
 // Helper chung: apply payment to bill
 // Tự động fallback nếu MongoDB không hỗ trợ transaction (standalone)
 export async function applyPaymentToBill(payment, rawParams = {}) {
-  if (!payment || !payment.billId) throw new Error("Payment or billId missing");
+    if (!payment || !payment.billId) throw new Error("Payment or billId missing");
 
-  let session;
-  try {
-    session = await mongoose.startSession();
-    await session.withTransaction(async () => {
-      const bill = await Bill.findById(payment.billId).session(session);
-      if (!bill) throw new Error("Bill not found");
+    let session;
+    try {
+        session = await mongoose.startSession();
+        await session.withTransaction(async () => {
+            const bill = await Bill.findById(payment.billId).session(session);
+            if (!bill) throw new Error("Bill not found");
 
-      const exists = (bill.payments || []).find(
-        (p) => p.transactionId === payment.transactionId && p.provider === payment.provider
-      );
-      if (exists) {
-        if (payment.status !== "SUCCESS") {
-          payment.status = "SUCCESS";
-          payment.metadata = rawParams;
-          await payment.save({ session });
+            const exists = (bill.payments || []).find(
+                (p) => p.transactionId === payment.transactionId && p.provider === payment.provider
+            );
+            if (exists) {
+                if (payment.status !== "SUCCESS") {
+                    payment.status = "SUCCESS";
+                    payment.metadata = rawParams;
+                    await payment.save({ session });
+                }
+                return;
+            }
+
+            const amountNum = decToNumber(payment.amount);
+            if (amountNum <= 0) throw new Error("Invalid payment amount");
+
+            bill.payments = bill.payments || [];
+            bill.payments.push({
+                paidAt: new Date(),
+                amount: mongoose.Types.Decimal128.fromString(amountNum.toFixed(2)),
+                method: payment.method || payment.provider,
+                provider: payment.provider,
+                transactionId: payment.transactionId,
+                note: rawParams?.note || "Auto apply",
+                metadata: rawParams,
+            });
+
+            const prevPaid = decToNumber(bill.amountPaid);
+            const newPaid = prevPaid + amountNum;
+            bill.amountPaid = mongoose.Types.Decimal128.fromString(newPaid.toFixed(2));
+
+            const due = decToNumber(bill.amountDue);
+            if (newPaid >= due) bill.status = "PAID";
+            else if (newPaid > 0) bill.status = "PARTIALLY_PAID";
+            else bill.status = "UNPAID";
+
+            await bill.save({ session });
+
+            payment.status = "SUCCESS";
+            payment.metadata = rawParams;
+            await payment.save({ session });
+        });
+    } catch (err) {
+        // fallback nếu MongoDB không hỗ trợ transaction
+        const unsupported = err?.code === 20 || /Transaction numbers/.test(err?.message || "");
+        if (!unsupported) throw err;
+
+        console.warn("⚠️ MongoDB không hỗ trợ transaction, fallback non-transaction mode");
+
+        const bill = await Bill.findById(payment.billId);
+        if (!bill) throw new Error("Bill not found");
+
+        const exists = (bill.payments || []).find(
+            (p) => p.transactionId === payment.transactionId && p.provider === payment.provider
+        );
+        if (exists) {
+            if (payment.status !== "SUCCESS") {
+                payment.status = "SUCCESS";
+                payment.metadata = rawParams;
+                await payment.save();
+            }
+            return;
         }
-        return;
-      }
 
-      const amountNum = decToNumber(payment.amount);
-      if (amountNum <= 0) throw new Error("Invalid payment amount");
+        const amountNum = decToNumber(payment.amount);
+        if (amountNum <= 0) throw new Error("Invalid payment amount");
 
-      bill.payments = bill.payments || [];
-      bill.payments.push({
-        paidAt: new Date(),
-        amount: mongoose.Types.Decimal128.fromString(amountNum.toFixed(2)),
-        method: payment.method || payment.provider,
-        provider: payment.provider,
-        transactionId: payment.transactionId,
-        note: rawParams?.note || "Auto apply",
-        metadata: rawParams,
-      });
+        bill.payments = bill.payments || [];
+        bill.payments.push({
+            paidAt: new Date(),
+            amount: mongoose.Types.Decimal128.fromString(amountNum.toFixed(2)),
+            method: payment.method || payment.provider,
+            provider: payment.provider,
+            transactionId: payment.transactionId,
+            note: rawParams?.note || "Auto apply",
+            metadata: rawParams,
+        });
 
-      const prevPaid = decToNumber(bill.amountPaid);
-      const newPaid = prevPaid + amountNum;
-      bill.amountPaid = mongoose.Types.Decimal128.fromString(newPaid.toFixed(2));
+        const prevPaid = decToNumber(bill.amountPaid);
+        const newPaid = prevPaid + amountNum;
+        bill.amountPaid = mongoose.Types.Decimal128.fromString(newPaid.toFixed(2));
 
-      const due = decToNumber(bill.amountDue);
-      if (newPaid >= due) bill.status = "PAID";
-      else if (newPaid > 0) bill.status = "PARTIALLY_PAID";
-      else bill.status = "UNPAID";
+        const due = decToNumber(bill.amountDue);
+        if (newPaid >= due) bill.status = "PAID";
+        else if (newPaid > 0) bill.status = "PARTIALLY_PAID";
+        else bill.status = "UNPAID";
 
-      await bill.save({ session });
+        await bill.save();
 
-      payment.status = "SUCCESS";
-      payment.metadata = rawParams;
-      await payment.save({ session });
-    });
-  } catch (err) {
-    // fallback nếu MongoDB không hỗ trợ transaction
-    const unsupported = err?.code === 20 || /Transaction numbers/.test(err?.message || "");
-    if (!unsupported) throw err;
-
-    console.warn("⚠️ MongoDB không hỗ trợ transaction, fallback non-transaction mode");
-
-    const bill = await Bill.findById(payment.billId);
-    if (!bill) throw new Error("Bill not found");
-
-    const exists = (bill.payments || []).find(
-      (p) => p.transactionId === payment.transactionId && p.provider === payment.provider
-    );
-    if (exists) {
-      if (payment.status !== "SUCCESS") {
         payment.status = "SUCCESS";
         payment.metadata = rawParams;
         await payment.save();
-      }
-      return;
+    } finally {
+        if (session) session.endSession();
     }
-
-    const amountNum = decToNumber(payment.amount);
-    if (amountNum <= 0) throw new Error("Invalid payment amount");
-
-    bill.payments = bill.payments || [];
-    bill.payments.push({
-      paidAt: new Date(),
-      amount: mongoose.Types.Decimal128.fromString(amountNum.toFixed(2)),
-      method: payment.method || payment.provider,
-      provider: payment.provider,
-      transactionId: payment.transactionId,
-      note: rawParams?.note || "Auto apply",
-      metadata: rawParams,
-    });
-
-    const prevPaid = decToNumber(bill.amountPaid);
-    const newPaid = prevPaid + amountNum;
-    bill.amountPaid = mongoose.Types.Decimal128.fromString(newPaid.toFixed(2));
-
-    const due = decToNumber(bill.amountDue);
-    if (newPaid >= due) bill.status = "PAID";
-    else if (newPaid > 0) bill.status = "PARTIALLY_PAID";
-    else bill.status = "UNPAID";
-
-    await bill.save();
-
-    payment.status = "SUCCESS";
-    payment.metadata = rawParams;
-    await payment.save();
-  } finally {
-    if (session) session.endSession();
-  }
 }
 
 // ============== createPayment ==============
 // POST /pay/create
 // body: { billId, amount, provider, bankCode? }
 export const createPayment = async (req, res) => {
+    console.log('[HANDLER] createPayment called', req.method, req.originalUrl, 'authHeader=', req.headers.authorization);
+
     try {
         const { billId, amount, provider = "VNPAY", bankCode } = req.body;
         if (!billId || !amount) return res.status(400).json({ error: "billId and amount required" });
