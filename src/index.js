@@ -53,7 +53,7 @@ app.use("/api", logRoute);
 
 app.use("/api", userRoute);
 app.use("/api/admin/complaints", complaintRoute); // ADMIN complaint routes
-app.use("/payment", payRouter);
+app.use("/api/payment", payRouter);
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);
