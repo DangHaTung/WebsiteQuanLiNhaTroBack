@@ -20,8 +20,8 @@ const getMomoConfig = () => ({
     accessKey: process.env.MOMO_ACCESS_KEY || "F8BBA842ECF85",
     secretKey: process.env.MOMO_SECRET_KEY || "K951B6PE1waDMi640xX08PD3vg6EkVlz",
     partnerCode: process.env.MOMO_PARTNER_CODE || "MOMO",
-    redirectUrl: process.env.MOMO_RETURN_URL || "http://localhost:3000/payment/momo/return",
-    ipnUrl: process.env.MOMO_IPN_URL || "http://localhost:3000/payment/momo/ipn",
+    redirectUrl: process.env.MOMO_RETURN_URL || "http://localhost:3000/api/payment/momo/return",
+    ipnUrl: process.env.MOMO_IPN_URL || "http://localhost:3000/api/payment/momo/ipn",
 });
 
 /** Verify MoMo HMAC SHA256 signature
