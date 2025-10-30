@@ -15,7 +15,7 @@ export const authenticateToken = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
+
     // Tìm user để đảm bảo user vẫn tồn tại
     const user = await User.findById(decoded.id).select('-passwordHash');
     if (!user) {
@@ -40,7 +40,7 @@ export const authenticateToken = async (req, res, next) => {
         message: 'Token đã hết hạn',
       });
     }
-    
+
     return res.status(500).json({
       success: false,
       message: 'Lỗi xác thực token',
@@ -100,23 +100,23 @@ export const authorizeOwnerOrAdmin = (resourceUserIdField = 'userId') => {
   };
 };
 
-// Middleware xác thực tùy chọn (không bắt buộc)
+// Optional auth: nếu có token thì gán req.user, nếu không có thì tiếp tục (không trả 401)
 export const optionalAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    if (!token) return next(); // không có token -> tiếp tục (public)
 
-    if (token) {
+    try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const user = await User.findById(decoded.id).select('-passwordHash');
-      if (user) {
-        req.user = user;
-      }
+      if (user) req.user = user;
+    } catch (err) {
+      // token không hợp lệ -> bỏ qua, không trả 401
+      console.warn('optionalAuth: invalid token', err?.message || err);
     }
-    
     next();
-  } catch (error) {
-    // Bỏ qua lỗi và tiếp tục không có user
+  } catch (err) {
     next();
   }
 };

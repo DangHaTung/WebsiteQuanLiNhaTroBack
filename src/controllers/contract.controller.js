@@ -4,8 +4,8 @@ import Contract from "../models/contract.model.js";
  * Helper convert Decimal128 sang number
  */
 const convertDecimal128 = (value) => {
-    if (value === null || value === undefined) return null;
-    return parseFloat(value.toString());
+  if (value === null || value === undefined) return null;
+  return parseFloat(value.toString());
 };
 
 /**
@@ -25,10 +25,10 @@ const formatContract = (contract) => {
     monthlyRent: convertDecimal128(contract.monthlyRent),
     pricingSnapshot: contract.pricingSnapshot
       ? {
-          ...contract.pricingSnapshot,
-          monthlyRent: convertDecimal128(contract.pricingSnapshot.monthlyRent),
-          deposit: convertDecimal128(contract.pricingSnapshot.deposit),
-        }
+        ...contract.pricingSnapshot,
+        monthlyRent: convertDecimal128(contract.pricingSnapshot.monthlyRent),
+        deposit: convertDecimal128(contract.pricingSnapshot.deposit),
+      }
       : undefined,
   };
 };
@@ -112,18 +112,19 @@ export const getAllContracts = async (req, res) => {
 
 // Tạo hợp đồng mới
 export const createContract = async (req, res) => {
+  // console.log("DEBUG createContract body:", req.body, "user:", req.user?.id);
   try {
     const contract = new Contract(req.body);
     await contract.save();
-    
+
     // Populate để trả về data đầy đủ
     const populatedContract = await Contract.findById(contract._id)
       .populate("tenantId", "fullName email phone")
       .populate("roomId", "roomNumber pricePerMonth");
-    
+
     // Format contract để chuyển đổi Decimal128 sang number
     const formattedContract = formatContract(populatedContract);
-    
+
     res.status(201).json({
       success: true,
       message: "Tạo hợp đồng thành công",
