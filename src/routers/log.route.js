@@ -29,7 +29,7 @@ const router = express.Router();
 router.use(authenticateToken);
 
 // Chỉ ADMIN mới có thể quản lý logs
-router.use(authorize('ADMIN'));
+router.use('/logs', authenticateToken, authorize('ADMIN'));
 
 // Routes cho Log CRUD
 router.post('/logs', validateBody(createLogSchema), asyncHandler(createLog));
