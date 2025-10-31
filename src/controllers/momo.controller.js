@@ -210,7 +210,7 @@ const momoReturn = async (req, res) => {
             else params._signatureVerified = true;
         }
 
-        const { resultCode, orderId, amount, message } = params;
+        const { resultCode, orderId, amount, message, extraData } = params;
         const success = Number(resultCode) === 0;
 
         // chỉ lưu metadata.returnData để audit — không finalize payment ở đây
@@ -220,15 +220,49 @@ const momoReturn = async (req, res) => {
             { new: true }
         );
 
+        // Thử finalize ngay tại RETURN (chủ yếu phục vụ khi test local không nhận IPN)
+        // Lưu ý: Return không phải nguồn chân lý. Ưu tiên IPN. Đây là fallback khi dev.
         if (success) {
-            return res.send(
-                `<h2>🎉 Giao dịch được xác nhận tạm thời</h2><p>Mã giao dịch: ${orderId}</p><p>Số tiền: ${amount}đ</p><p>Vui lòng chờ xác nhận chính thức (IPN).</p><a href="/">Về trang chủ</a>`
-            );
-        } else {
-            return res.send(
-                `<h2>❌ Thanh toán thất bại</h2><p>Lý do: ${message}</p><a href="/">Thử lại</a>`
-            );
+            try {
+                // Lấy billId từ extraData nếu có
+                let billId = null;
+                try {
+                    const extra = extraData ? JSON.parse(extraData) : {};
+                    billId = extra.billId || extra?.bill_id || null;
+                } catch {}
+
+                // Tìm payment theo transactionId (orderId)
+                let payment = await Payment.findOne({ provider: "MOMO", transactionId: orderId });
+                if (!payment && billId) {
+                    // tạo bản ghi tối thiểu nếu chưa có (hiếm khi xảy ra)
+                    const amountNum = Number(amount || 0);
+                    payment = await Payment.create({
+                        billId,
+                        provider: "MOMO",
+                        transactionId: orderId,
+                        amount: mongoose.Types.Decimal128.fromString(amountNum.toFixed(2)),
+                        status: "PENDING",
+                        method: "REDIRECT",
+                        metadata: { returnData: params },
+                    });
+                }
+                if (payment && payment.status !== "SUCCESS") {
+                    await applyPaymentToBill(payment, params);
+                }
+            } catch (e) {
+                console.warn("momoReturn finalize fallback failed:", e?.message || e);
+            }
         }
+
+        if (success) {
+            const successUrl = process.env.FRONTEND_SUCCESS_URL || "http://localhost:5173/payment-success";
+            const qs = new URLSearchParams({ orderId: String(orderId || ""), amount: String(amount || "") }).toString();
+            return res.redirect(`${successUrl}?${qs}`);
+        }
+
+        return res.send(
+            `<h2>❌ Thanh toán thất bại</h2><p>Lý do: ${message}</p><a href="/">Thử lại</a>`
+        );
     } catch (err) {
         console.error("momoReturn error:", err);
         return res.status(500).send("Internal error");
