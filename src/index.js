@@ -42,6 +42,7 @@ app.use("/api", contractPublicRoute);  // /contracts/my-contracts
 app.use("/api", tenantPublicRoute);    // /tennant, /tennant/my-tenant
 app.use("/api", checkinPublicRoute);   // /checkin/cash
 app.use("/api/complaints", complaintPublicRoute); // PUBLIC complaint routes
+app.use("/api/payment", payRouter);
 
 // Đăng ký PROTECTED routes (cần auth)
 app.use("/api", authRoute);
@@ -53,7 +54,6 @@ app.use("/api", logRoute);
 
 app.use("/api", userRoute);
 app.use("/api/admin/complaints", complaintRoute); // ADMIN complaint routes
-app.use("/api/payment", payRouter);
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);
