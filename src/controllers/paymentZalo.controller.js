@@ -1,8 +1,10 @@
+import mongoose from "mongoose";
 import axios from "axios";
 import moment from "moment";
 import CryptoJS from "crypto-js";
 import Bill from "../models/bill.model.js";
 import Payment from "../models/payment.model.js";
+import { applyPaymentToBill } from "../controllers/payment.controller.js";
 
 const config = {
   app_id: 2554,
@@ -68,8 +70,9 @@ export const createZaloOrder = async (req, res) => {
     }
 
     const transID = Math.floor(Math.random() * 1000000);
+    const returnUrl = process.env.ZALOPAY_RETURN_URL || "http://localhost:3000/api/payment/zalopay/return";
     const embed_data = {
-      redirecturl: `http://localhost:5173/payment-result?paymentMethod=zalopay&billId=${billId}`,
+      redirecturl: returnUrl,
       billId,
     };
 
@@ -120,13 +123,17 @@ export const createZaloOrder = async (req, res) => {
       billId,
       provider: "ZALOPAY",
       transactionId: order.app_trans_id,
-      amount: bill.amountDue,
+      amount: mongoose.Types.Decimal128.fromString(Math.round(Number(bill.amountDue)).toFixed(2)),
       status: "PENDING",
-      metadata: zaloRes.data,
+      method: "REDIRECT",
+      metadata: { createdFrom: "createZaloOrder", zaloResponse: zaloRes.data },
     });
 
     return res.status(200).json({
+      success: true,
       zaloData: zaloRes.data,
+      payUrl: zaloRes.data?.order_url || zaloRes.data?.orderurl,
+      transactionId: order.app_trans_id,
     });
   } catch (error) {
     console.error(
@@ -141,7 +148,7 @@ export const createZaloOrder = async (req, res) => {
 };
 
 // ==============================
-// Callback từ ZaloPay
+// Callback từ ZaloPay (IPN - nguồn chân lý)
 // ==============================
 export const zaloCallback = async (req, res) => {
   let result = {};
@@ -153,37 +160,52 @@ export const zaloCallback = async (req, res) => {
     if (reqMac !== mac) {
       result.return_code = -1;
       result.return_message = "mac not equal";
-    } else {
-      const dataJson = JSON.parse(dataStr);
-      const { app_trans_id, amount } = dataJson;
+      return res.json(result);
+    }
 
-      const payment = await Payment.findOneAndUpdate(
-        { provider: "ZALOPAY", transactionId: app_trans_id },
-        { status: "SUCCESS", metadata: dataJson },
-        { new: true }
-      );
+    const dataJson = JSON.parse(dataStr);
+    const { app_trans_id, zp_trans_id, amount, return_code } = dataJson;
 
-      if (payment) {
-        await Bill.findByIdAndUpdate(payment.billId, {
-          status: "PAID",
-          $push: {
-            payments: {
-              paidAt: new Date(),
-              amount: amount,
-              method: "ZALOPAY",
-              provider: "ZALOPAY",
-              transactionId: app_trans_id,
-            },
-          },
-        });
-      }
+    // Tìm payment theo transactionId
+    let payment = await Payment.findOne({ provider: "ZALOPAY", transactionId: app_trans_id });
 
+    if (!payment) {
       result.return_code = 1;
-      result.return_message = "success";
+      result.return_message = "Payment record not found";
+      return res.json(result);
+    }
+
+    // Idempotency: nếu đã SUCCESS, return success
+    if (payment.status === "SUCCESS") {
+      result.return_code = 1;
+      result.return_message = "Already processed";
+      return res.json(result);
+    }
+
+    // ZaloPay return_code = 1 là thành công
+    if (return_code === 1 && Number(amount) > 0) {
+      // Apply payment using shared helper (atomic) - tự động cập nhật bill status
+      try {
+        await applyPaymentToBill(payment, dataJson);
+        result.return_code = 1;
+        result.return_message = "Confirm Success";
+      } catch (e) {
+        console.error("applyPaymentToBill error (ZaloPay callback):", e);
+        result.return_code = 0;
+        result.return_message = "Internal error";
+      }
+    } else {
+      // Mark failed
+      payment.status = "FAILED";
+      payment.metadata = { ...payment.metadata, callbackData: dataJson };
+      await payment.save();
+      result.return_code = 1;
+      result.return_message = "Payment failed";
     }
   } catch (ex) {
+    console.error("ZaloPay callback error:", ex);
     result.return_code = 0;
-    result.return_message = ex.message;
+    result.return_message = ex.message || "Internal error";
   }
 
   res.json(result);
@@ -282,14 +304,45 @@ export const checkPaymentStatus = async (req, res) => {
 
 export const zaloReturn = async (req, res) => {
   try {
-    const { billId, status, apptransid } = req.query; // tuỳ frontend gửi gì
+    const { apptransid, status } = req.query;
 
-    // Bạn có thể redirect về frontend hoặc trả ra trang cảm ơn
-    return res.redirect(
-      `http://localhost:5173/payment-result?paymentMethod=zalopay&billId=${billId}&status=${
-        status || "success"
-      }`
-    );
+    // Tìm payment theo transactionId
+    const payment = await Payment.findOne({ provider: "ZALOPAY", transactionId: apptransid });
+    if (!payment) {
+      return res.status(404).send("Payment record not found");
+    }
+
+    if (payment.status === "SUCCESS") {
+      // Đã xử lý rồi, redirect về frontend
+      const successUrl = process.env.FRONTEND_SUCCESS_URL || "http://localhost:5173/payment-success";
+      const qs = new URLSearchParams({
+        orderId: String(apptransid || ""),
+        amount: String(payment.amount.toString() || ""),
+      }).toString();
+      return res.redirect(`${successUrl}?${qs}`);
+    }
+
+    // Nếu chưa success, thử apply payment nếu status = success từ query (fallback khi test local)
+    if (status === "1" || status === "success") {
+      try {
+        await applyPaymentToBill(payment, req.query);
+        const successUrl = process.env.FRONTEND_SUCCESS_URL || "http://localhost:5173/payment-success";
+        const qs = new URLSearchParams({
+          orderId: String(apptransid || ""),
+          amount: String(payment.amount.toString() || ""),
+        }).toString();
+        return res.redirect(`${successUrl}?${qs}`);
+      } catch (e) {
+        console.error("applyPaymentToBill error (ZaloPay return):", e);
+        return res.status(500).send("Server error while applying payment");
+      }
+    }
+
+    // Failed
+    payment.status = "FAILED";
+    payment.metadata = { ...payment.metadata, returnData: req.query };
+    await payment.save();
+    return res.send("Payment failed or cancelled");
   } catch (error) {
     console.error("ZaloPay return error:", error);
     return res.status(500).send("ZaloPay return failed.");
