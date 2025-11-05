@@ -3,6 +3,7 @@ import User from '../models/user.model.js';
 
 // Middleware xác thực JWT
 export const authenticateToken = async (req, res, next) => {
+  console.log('[authenticateToken] headers.authorization=', req.headers.authorization);
   try {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
@@ -102,6 +103,7 @@ export const authorizeOwnerOrAdmin = (resourceUserIdField = 'userId') => {
 
 // Optional auth: nếu có token thì gán req.user, nếu không có thì tiếp tục (không trả 401)
 export const optionalAuth = async (req, res, next) => {
+  console.log('[optionalAuth] headers.authorization=', req.headers.authorization);
   try {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN

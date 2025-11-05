@@ -33,7 +33,7 @@ app.use(cors());
 // Phân tích dữ liệu JSON và form
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
+app.use("/api/payment", payRouter);
 // Đăng ký route
 // QUAN TRỌNG: Đăng ký PUBLIC routes TRƯỚC các route có middleware
 app.use("/api", roomPublicRoute);      // /rooms/public
@@ -42,7 +42,6 @@ app.use("/api", contractPublicRoute);  // /contracts/my-contracts
 app.use("/api", tenantPublicRoute);    // /tennant, /tennant/my-tenant
 app.use("/api", checkinPublicRoute);   // /checkin/cash
 app.use("/api/complaints", complaintPublicRoute); // PUBLIC complaint routes
-app.use("/api/payment", payRouter);
 
 // Đăng ký PROTECTED routes (cần auth)
 app.use("/api", authRoute);
@@ -54,6 +53,7 @@ app.use("/api", logRoute);
 
 app.use("/api", userRoute);
 app.use("/api/admin/complaints", complaintRoute); // ADMIN complaint routes
+
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);
