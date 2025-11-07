@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon --exec babel-node src/index.js",
+    "reset:final-contracts": "babel-node scripts/reset_final_contracts.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
