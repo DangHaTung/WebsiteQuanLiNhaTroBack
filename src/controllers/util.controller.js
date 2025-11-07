@@ -11,12 +11,6 @@ const formatUtil = (util) => {
         name: obj.name,
         condition: obj.condition,
         description: obj.description,
-        brand: obj.brand,
-        model: obj.model,
-        purchaseDate: obj.purchaseDate,
-        warrantyExpiryDate: obj.warrantyExpiryDate,
-        lastMaintenanceDate: obj.lastMaintenanceDate,
-        notes: obj.notes,
         isActive: obj.isActive,
         room: obj.room,
         createdAt: obj.createdAt,
@@ -109,12 +103,6 @@ export const createUtil = async (req, res) => {
             name,
             condition,
             description,
-            brand,
-            model,
-            purchaseDate,
-            warrantyExpiryDate,
-            lastMaintenanceDate,
-            notes,
             room,
         } = req.body;
 
@@ -130,12 +118,6 @@ export const createUtil = async (req, res) => {
             name,
             condition,
             description,
-            brand,
-            model,
-            purchaseDate,
-            warrantyExpiryDate,
-            lastMaintenanceDate,
-            notes,
             room,
         });
 
@@ -315,7 +297,7 @@ export const getBrokenUtils = async (req, res) => {
 export const updateUtilCondition = async (req, res) => {
     try {
         const { id } = req.params;
-        const { condition, notes } = req.body;
+        const { condition } = req.body;
 
         if (!mongoose.isValidObjectId(id))
             return res.status(400).json({ 
@@ -336,7 +318,7 @@ export const updateUtilCondition = async (req, res) => {
             success: false 
         });
 
-        await util.updateCondition(condition, notes);
+        await util.updateCondition(condition);
         const populated = await util.populate('room', 'roomNumber type status');
 
         res.status(200).json({

@@ -43,58 +43,6 @@ export const createUtilSchema = Joi.object({
         .messages({
             'string.max': 'Description không được vượt quá 500 ký tự',
         }),
-
-    brand: Joi.string()
-        .trim()
-        .max(100)
-        .optional()
-        .messages({
-            'string.max': 'Brand không được vượt quá 100 ký tự',
-        }),
-
-    model: Joi.string()
-        .trim()
-        .max(100)
-        .optional()
-        .messages({
-            'string.max': 'Model không được vượt quá 100 ký tự',
-        }),
-
-    purchaseDate: Joi.date()
-        .iso()
-        .max('now')
-        .optional()
-        .messages({
-            'date.format': 'PurchaseDate phải có định dạng ISO 8601',
-            'date.max': 'PurchaseDate không được lớn hơn ngày hiện tại',
-        }),
-
-    warrantyExpiryDate: Joi.date()
-        .iso()
-        .min(Joi.ref('purchaseDate'))
-        .optional()
-        .messages({
-            'date.format': 'WarrantyExpiryDate phải có định dạng ISO 8601',
-            'date.min': 'WarrantyExpiryDate phải lớn hơn hoặc bằng PurchaseDate',
-        }),
-
-    lastMaintenanceDate: Joi.date()
-        .iso()
-        .max('now')
-        .optional()
-        .messages({
-            'date.format': 'LastMaintenanceDate phải có định dạng ISO 8601',
-            'date.max': 'LastMaintenanceDate không được lớn hơn ngày hiện tại',
-        }),
-
-    notes: Joi.string()
-        .trim()
-        .max(1000)
-        .optional()
-        .messages({
-            'string.max': 'Notes không được vượt quá 1000 ký tự',
-        }),
-
     room: Joi.string()
         .pattern(/^[0-9a-fA-F]{24}$/)
         .optional()
@@ -127,56 +75,7 @@ export const updateUtilSchema = Joi.object({
             'string.max': 'Description không được vượt quá 500 ký tự',
         }),
 
-    brand: Joi.string()
-        .trim()
-        .max(100)
-        .optional()
-        .messages({
-            'string.max': 'Brand không được vượt quá 100 ký tự',
-        }),
 
-    model: Joi.string()
-        .trim()
-        .max(100)
-        .optional()
-        .messages({
-            'string.max': 'Model không được vượt quá 100 ký tự',
-        }),
-
-    purchaseDate: Joi.date()
-        .iso()
-        .max('now')
-        .optional()
-        .messages({
-            'date.format': 'PurchaseDate phải có định dạng ISO 8601',
-            'date.max': 'PurchaseDate không được lớn hơn ngày hiện tại',
-        }),
-
-    warrantyExpiryDate: Joi.date()
-        .iso()
-        .min(Joi.ref('purchaseDate'))
-        .optional()
-        .messages({
-            'date.format': 'WarrantyExpiryDate phải có định dạng ISO 8601',
-            'date.min': 'WarrantyExpiryDate phải lớn hơn hoặc bằng PurchaseDate',
-        }),
-
-    lastMaintenanceDate: Joi.date()
-        .iso()
-        .max('now')
-        .optional()
-        .messages({
-            'date.format': 'LastMaintenanceDate phải có định dạng ISO 8601',
-            'date.max': 'LastMaintenanceDate không được lớn hơn ngày hiện tại',
-        }),
-
-    notes: Joi.string()
-        .trim()
-        .max(1000)
-        .optional()
-        .messages({
-            'string.max': 'Notes không được vượt quá 1000 ký tự',
-        }),
 
     room: Joi.string()
         .pattern(/^[0-9a-fA-F]{24}$/)

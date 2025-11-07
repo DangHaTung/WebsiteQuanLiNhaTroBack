@@ -40,33 +40,6 @@ const utilSchema = new Schema(
             trim: true,
             default: "",
         },
-        brand: {
-            type: String,
-            trim: true,
-            default: "",
-        },
-        model: {
-            type: String,
-            trim: true,
-            default: "",
-        },
-        purchaseDate: {
-            type: Date,
-            required: false,
-        },
-        warrantyExpiryDate: {
-            type: Date,
-            required: false,
-        },
-        lastMaintenanceDate: {
-            type: Date,
-            required: false,
-        },
-        notes: {
-            type: String,
-            trim: true,
-            default: "",
-        },
         isActive: {
             type: Boolean,
             default: true,
@@ -87,14 +60,8 @@ const utilSchema = new Schema(
 utilSchema.index({ name: 1, condition: 1, room: 1 }, { unique: true });
 
 // Instance method to update condition
-utilSchema.methods.updateCondition = function(newCondition, notes = "") {
+utilSchema.methods.updateCondition = function(newCondition) {
     this.condition = newCondition;
-    if (notes) {
-        this.notes = notes;
-    }
-    if (newCondition === "broken") {
-        this.lastMaintenanceDate = new Date();
-    }
     return this.save();
 };
 
