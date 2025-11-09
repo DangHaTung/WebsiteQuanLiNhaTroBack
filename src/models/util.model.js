@@ -57,7 +57,7 @@ const utilSchema = new Schema(
 );
 
 // Compound index to ensure unique combination of name, condition, and room
-utilSchema.index({ name: 1, condition: 1, room: 1 }, { unique: true });
+utilSchema.index({ name: 1, condition: 1 }, { unique: true });
 
 // Instance method to update condition
 utilSchema.methods.updateCondition = function(newCondition) {

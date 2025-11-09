@@ -7,13 +7,13 @@ import Payment from "../models/payment.model.js";
 import { applyPaymentToBill } from "../controllers/payment.controller.js";
 
 const config = {
-  app_id: 2554,
-  key1: "sdngKKJmqEMzvh5QQcdD2A9XBSKUNaYn",
-  key2: "trMrHtvjo6myautxDUiAcYsVtaeQ8nhf",
-  endpoint: "https://sb-openapi.zalopay.vn/v2/create",
-  queryEndpoint: "https://sb-openapi.zalopay.vn/v2/query",
-  callback_url: "http://localhost:3000/api/payment/zalopay/callback", // Cập nhật URL callback thực tế
-};
+  app_id: process.env.ZALOPAY_APP_ID,
+  key1: process.env.ZALOPAY_KEY1,
+  key2: process.env.ZALOPAY_KEY2,
+  endpoint: process.env.ZALOPAY_ENDPOINT,
+  queryEndpoint: process.env.ZALOPAY_QUERY_ENDPOINT,
+  callback_url: process.env.ZALOPAY_CALLBACK_URL, // Cập nhật URL callback thực tế
+};  
 
 // ==============================
 // Tạo order thanh toán ZaloPay
