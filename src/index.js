@@ -17,6 +17,9 @@ import tenantPublicRoute from "./routers/tenant.public.route.js"; // PUBLIC tena
 import userRoute from "./routers/user.route.js";
 import complaintRoute from "./routers/complaint.route.js"; // ADMIN complaint routes
 import complaintPublicRoute from "./routers/complaint.public.route.js"; // PUBLIC complaint routes
+import utilRoute from "./routers/util.route.js"; // ADMIN utility routes
+import utilityFeeRoute from "./routers/utilityFee.route.js"; // ADMIN utility fee routes
+import roomFeeRoute from "./routers/roomFee.route.js"; // ADMIN room fee routes
 import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
 import payRouter from "./routers/payment.route.js";
 import checkinPublicRoute from "./routers/checkin.public.route.js"; // PUBLIC checkin routes
@@ -57,7 +60,9 @@ app.use("/api", logRoute);
 
 app.use("/api", userRoute);
 app.use("/api/admin/complaints", complaintRoute); // ADMIN complaint routes
-
+app.use("/api", utilRoute); // ADMIN utility routes
+app.use("/api", utilityFeeRoute); // ADMIN utility fee routes (independent from room utilities)
+app.use("/api", roomFeeRoute); // ADMIN room fee routes
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);
