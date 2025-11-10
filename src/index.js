@@ -19,8 +19,7 @@ import complaintPublicRoute from "./routers/complaint.public.route.js"; // PUBLI
 import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
 import payRouter from "./routers/payment.route.js";
 import checkinPublicRoute from "./routers/checkin.public.route.js"; // PUBLIC checkin routes
-
-
+import searchRoute from "./routers/search.route.js";
 
 const app = express();
 
@@ -43,6 +42,8 @@ app.use("/api", tenantPublicRoute);    // /tennant, /tennant/my-tenant
 app.use("/api", checkinPublicRoute);   // /checkin/cash
 app.use("/api/complaints", complaintPublicRoute); // PUBLIC complaint routes
 app.use("/api/payment", payRouter);
+app.use("/api", userRoute);
+app.use("/api/admin/complaints", complaintRoute);
 
 // Đăng ký PROTECTED routes (cần auth)
 app.use("/api", authRoute);
@@ -51,9 +52,7 @@ app.use("/api", billRoute);     // ADMIN bill routes
 app.use("/api", contractRoute); // ADMIN contract routes
 app.use("/api", roomRoute);     // ADMIN room routes
 app.use("/api", logRoute);
-
-app.use("/api", userRoute);
-app.use("/api/admin/complaints", complaintRoute); // ADMIN complaint routes
+app.use("/api/search", searchRoute);
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);
