@@ -134,8 +134,8 @@ const createPayment = async (req, res) => {
 
         const requestBody = JSON.stringify({
             partnerCode,
-            partnerName: "TailieuZHost",
-            storeId: "MomoZHostStore",
+            partnerName: "Tro360",
+            storeId: "MomoTro360",
             requestId,
             amount: amountNum,
             orderId,
@@ -221,8 +221,16 @@ const momoReturn = async (req, res) => {
         );
 
         if (success) {
+            try {
+                let payment = await Payment.findOne({ provider: "MOMO", transactionId: orderId });
+                if (payment && payment.status !== "SUCCESS") {
+                    await applyPaymentToBill(payment, params);
+                }
+            } catch (e) {
+                console.error("momoReturn applyPayment error:", e);
+            }
             return res.send(
-                `<h2>🎉 Giao dịch được xác nhận tạm thời</h2><p>Mã giao dịch: ${orderId}</p><p>Số tiền: ${amount}đ</p><p>Vui lòng chờ xác nhận chính thức (IPN).</p><a href="/">Về trang chủ</a>`
+                `<h2>🎉 Thanh toán thành công</h2><p>Mã giao dịch: ${orderId}</p><p>Số tiền: ${amount}đ</p><a href="/">Về trang chủ</a>`
             );
         } else {
             return res.send(

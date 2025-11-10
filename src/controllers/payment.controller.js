@@ -198,10 +198,12 @@ export const vnpayReturn = async (req, res) => {
         }
 
         if (rspCode === "00") {
-            // apply payment via transaction helper
+            // apply payment via transaction helper, sau đó redirect về frontend success
             try {
                 await applyPaymentToBill(payment, params);
-                return res.send("Payment success — cảm ơn bạn");
+                const successUrl = process.env.FRONTEND_SUCCESS_URL || "http://localhost:5173/payment-success";
+                const qs = new URLSearchParams({ orderId: String(txnRef || ""), amount: String(params.vnp_Amount || "") }).toString();
+                return res.redirect(`${successUrl}?${qs}`);
             } catch (e) {
                 console.error("applyPaymentToBill error (return):", e);
                 return res.status(500).send("Server error while applying payment");
