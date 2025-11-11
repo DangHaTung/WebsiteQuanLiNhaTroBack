@@ -23,9 +23,8 @@ import roomFeeRoute from "./routers/roomFee.route.js"; // ADMIN room fee routes
 import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
 import payRouter from "./routers/payment.route.js";
 import checkinPublicRoute from "./routers/checkin.public.route.js"; // PUBLIC checkin routes
+import searchRoute from "./routers/search.route.js";
 import finalContractRoute from "./routers/finalContract.route.js"; // PROTECTED final contract routes
-
-
 
 const app = express();
 
@@ -48,6 +47,7 @@ app.use("/api", finalContractPublicRoute);  // /final-contracts (create & public
 app.use("/api", tenantPublicRoute);    // /tennant, /tennant/my-tenant
 app.use("/api", checkinPublicRoute);   // /checkin/cash
 app.use("/api/complaints", complaintPublicRoute); // PUBLIC complaint routes
+app.use("/api/search", searchRoute);
 
 // Đăng ký PROTECTED routes (cần auth)
 app.use("/api", authRoute);
