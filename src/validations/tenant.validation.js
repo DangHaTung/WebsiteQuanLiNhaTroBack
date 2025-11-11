@@ -21,11 +21,12 @@ export const createTenantSchema = Joi.object({
       'string.pattern.base': 'Phone phải từ 9-11 chữ số',
     }),
 
-  email: Joi.string()
-    .email()
+  address: Joi.string()
+    .trim()
+    .max(300)
     .optional()
     .messages({
-      'string.email': 'Email không hợp lệ',
+      'string.max': 'Address không được vượt quá 300 ký tự',
     }),
 
   identityNo: Joi.string()
@@ -63,11 +64,12 @@ export const updateTenantSchema = Joi.object({
       'string.pattern.base': 'Phone phải từ 9-11 chữ số',
     }),
 
-  email: Joi.string()
-    .email()
+  address: Joi.string()
+    .trim()
+    .max(300)
     .optional()
     .messages({
-      'string.email': 'Email không hợp lệ',
+      'string.max': 'Address không được vượt quá 300 ký tự',
     }),
 
   identityNo: Joi.string()

@@ -23,7 +23,7 @@ export const registerSchema = Joi.object({
   }),
 
   role: Joi.string()
-    .valid("ADMIN", "LANDLORD", "TENANT", "STAFF")
+    .valid("ADMIN", "TENANT")
     .default("TENANT"), // nếu không truyền, tự set TENANT
 });
 

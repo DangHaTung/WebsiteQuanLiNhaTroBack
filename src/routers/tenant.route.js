@@ -23,10 +23,10 @@ const router = express.Router();
 
 // ===== PROTECTED ROUTES - CẦN ADMIN/STAFF =====
 // Public routes đã được tách ra file riêng: tenant.public.route.js
-router.get("/tennant", authenticateToken, authorize('ADMIN', 'STAFF'), validatePagination(), asyncHandler(getAllTenants));
-router.get("/tennant/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(tenantParamsSchema), asyncHandler(getTenantById));
-router.put("/tennant/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(tenantParamsSchema), validateBody(updateTenantSchema), asyncHandler(updateTenant));
-router.delete("/tennant/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(tenantParamsSchema), asyncHandler(deleteTenant));
+router.get("/tennant", authenticateToken, authorize('ADMIN'), validatePagination(), asyncHandler(getAllTenants));
+router.get("/tennant/:id", authenticateToken, authorize('ADMIN'), validateParams(tenantParamsSchema), asyncHandler(getTenantById));
+router.put("/tennant/:id", authenticateToken, authorize('ADMIN'), validateParams(tenantParamsSchema), validateBody(updateTenantSchema), asyncHandler(updateTenant));
+router.delete("/tennant/:id", authenticateToken, authorize('ADMIN'), validateParams(tenantParamsSchema), asyncHandler(deleteTenant));
 
 export default router;
     

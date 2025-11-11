@@ -2,8 +2,8 @@ import mongoose from "mongoose";
 
 const { Schema } = mongoose;
 
-// Định nghĩa các vai trò có thể có
-const USER_ROLES = ["ADMIN", "LANDLORD", "TENANT", "STAFF"];
+// Định nghĩa các vai trò có thể có (đồng bộ với RBAC trong routes/controllers)
+const USER_ROLES = ["ADMIN", "TENANT"];
 
 const userSchema = new Schema(
   {
@@ -32,6 +32,12 @@ const userSchema = new Schema(
       type: String,
       enum: USER_ROLES,
       default: "TENANT",
+      index: true,
+    },
+    // Cờ kích hoạt tài khoản (phục vụ nghiệp vụ kích hoạt sau bill_contract = PAID)
+    isActive: {
+      type: Boolean,
+      default: true,
       index: true,
     },
   },

@@ -40,4 +40,10 @@ router.post("/zalopay/create", zaloController.createZaloOrder);
 // If you want create to require login, replace optionalAuth with authenticateToken:
 // router.post("/vnpay/create", authenticateToken, paymentController.createPayment);
 
+// Simple success endpoint for local redirect testing
+router.get("/success", (req, res) => {
+  const { orderId, amount } = req.query || {};
+  return res.status(200).json({ success: true, message: "Payment success", orderId, amount });
+});
+
 export default router;

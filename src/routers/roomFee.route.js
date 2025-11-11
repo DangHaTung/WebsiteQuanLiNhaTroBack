@@ -11,7 +11,7 @@ const router = express.Router();
 router.post(
   "/rooms/:roomId/fees",
   authenticateToken,
-  authorize("ADMIN", "STAFF"),
+authorize("ADMIN"),
   validateParams(roomParamsSchema),
   validateBody(assignRoomFeesSchema),
   asyncHandler(assignRoomFees)
@@ -21,7 +21,7 @@ router.post(
 router.get(
   "/rooms/:roomId/fees",
   authenticateToken,
-  authorize("ADMIN", "STAFF"),
+authorize("ADMIN"),
   validateParams(roomParamsSchema),
   asyncHandler(getRoomFees)
 );
@@ -30,7 +30,7 @@ router.get(
 router.post(
   "/rooms/:roomId/fees/calculate",
   authenticateToken,
-  authorize("ADMIN", "STAFF"),
+authorize("ADMIN"),
   validateParams(roomParamsSchema),
   validateBody(calculateRoomFeesSchema),
   asyncHandler(calculateRoomFees)

@@ -18,7 +18,7 @@ export const createUserSchema = Joi.object({
     'string.min': 'Password phải có ít nhất 6 ký tự',
     'any.required': 'Password là bắt buộc',
   }),
-  role: Joi.string().valid('ADMIN', 'LANDLORD', 'TENANT', 'STAFF').optional().messages({
+  role: Joi.string().valid('ADMIN', 'TENANT').optional().messages({
     'any.only': 'Role không hợp lệ',
   }),
 });
@@ -38,7 +38,7 @@ export const updateUserSchema = Joi.object({
   password: Joi.string().min(6).optional().messages({
     'string.min': 'Password phải có ít nhất 6 ký tự',
   }),
-  role: Joi.string().valid('ADMIN', 'LANDLORD', 'TENANT', 'STAFF').optional().messages({
+  role: Joi.string().valid('ADMIN', 'TENANT').optional().messages({
     'any.only': 'Role không hợp lệ',
   }),
 }).min(1).messages({
@@ -64,7 +64,7 @@ export const userQuerySchema = Joi.object({
     'number.min': 'Limit phải lớn hơn hoặc bằng 1',
     'number.max': 'Limit không được vượt quá 100',
   }),
-  role: Joi.string().valid('ADMIN', 'LANDLORD', 'TENANT', 'STAFF').optional().messages({
+  role: Joi.string().valid('ADMIN', 'TENANT').optional().messages({
     'any.only': 'Role không hợp lệ',
   }),
   keyword: Joi.string().trim().max(100).optional().messages({
