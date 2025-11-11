@@ -5,6 +5,7 @@ const tenantSchema = new mongoose.Schema(
         phone:{type:String},
         email:{type:String},
         identityNo: { type: String },
+        address: { type: String },
         note:{type:String},
     },
     {timestamps:{createdAt:true,updatedAt:false}}

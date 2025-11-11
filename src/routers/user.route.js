@@ -5,6 +5,7 @@ import {
   createUser,
   updateUser,
   deleteUser,
+  activateTenantIfContractBillPaid,
 } from "../controllers/user.controller.js";
 import {
   createUserSchema,
@@ -23,9 +24,11 @@ router.get("/users", optionalAuth, validateQuery(userQuerySchema), asyncHandler(
 router.get("/users/:id", optionalAuth, validateParams(userParamsSchema), asyncHandler(getUserById));
 
 // Protected routes - cần authentication và authorization
-router.post("/users", authenticateToken, authorize('ADMIN', 'STAFF'), validateBody(createUserSchema), asyncHandler(createUser));
-router.put("/users/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(userParamsSchema), validateBody(updateUserSchema), asyncHandler(updateUser));
-router.delete("/users/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(userParamsSchema), asyncHandler(deleteUser));
+router.post("/users", authenticateToken, authorize('ADMIN'), validateBody(createUserSchema), asyncHandler(createUser));
+router.put("/users/:id", authenticateToken, authorize('ADMIN'), validateParams(userParamsSchema), validateBody(updateUserSchema), asyncHandler(updateUser));
+router.delete("/users/:id", authenticateToken, authorize('ADMIN'), validateParams(userParamsSchema), asyncHandler(deleteUser));
+// Kích hoạt tài khoản TENANT sau bill_contract = PAID
+router.put("/users/:id/activate", authenticateToken, authorize('ADMIN'), validateParams(userParamsSchema), asyncHandler(activateTenantIfContractBillPaid));
 
 export default router;
 

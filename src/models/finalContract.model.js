@@ -16,7 +16,8 @@ const fileSchema = new Schema(
 
 const finalContractSchema = new Schema(
   {
-    tenantId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    // Cho phép tạo FinalContract khi chưa có tài khoản người thuê; gán sau
+    tenantId: { type: Schema.Types.ObjectId, ref: "User", required: false },
     roomId: { type: Schema.Types.ObjectId, ref: "Room", required: true },
     originContractId: { type: Schema.Types.ObjectId, ref: "Contract" },
 

@@ -20,11 +20,11 @@ import {
 
 const router = express.Router();
 
-// ADMIN/STAFF routes
+// ADMIN routes
 router.get(
   "/fees",
   authenticateToken,
-  authorize("ADMIN", "STAFF"),
+  authorize("ADMIN"),
   validateQuery(feeQuerySchema),
   asyncHandler(getAllFees)
 );
@@ -32,7 +32,7 @@ router.get(
 router.get(
   "/fees/:id",
   authenticateToken,
-  authorize("ADMIN", "STAFF"),
+  authorize("ADMIN"),
   validateParams(feeParamsSchema),
   asyncHandler(getFeeById)
 );
@@ -40,7 +40,7 @@ router.get(
 router.post(
   "/fees",
   authenticateToken,
-  authorize("ADMIN", "STAFF"),
+  authorize("ADMIN"),
   validateBody(createFeeSchema),
   asyncHandler(createFee)
 );
@@ -48,7 +48,7 @@ router.post(
 router.put(
   "/fees/:id",
   authenticateToken,
-  authorize("ADMIN", "STAFF"),
+  authorize("ADMIN"),
   validateParams(feeParamsSchema),
   validateBody(updateFeeSchema),
   asyncHandler(updateFee)
@@ -57,7 +57,7 @@ router.put(
 router.delete(
   "/fees/:id",
   authenticateToken,
-  authorize("ADMIN", "STAFF"),
+  authorize("ADMIN"),
   validateParams(feeParamsSchema),
   asyncHandler(deleteFee)
 );
@@ -66,7 +66,7 @@ router.delete(
 router.post(
   "/fees/electricity/calculate",
   authenticateToken,
-  authorize("ADMIN", "STAFF"),
+  authorize("ADMIN"),
   validateBody(electricityCalcSchema),
   asyncHandler(calculateElectricity)
 );

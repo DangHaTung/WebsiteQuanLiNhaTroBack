@@ -28,28 +28,28 @@ const router = express.Router();
 
 // ===== PROTECTED ROUTES - CẦN ADMIN/STAFF =====
 // Lấy danh sách utilities (có phân trang, filter)
-router.get("/utils", authenticateToken, authorize('ADMIN', 'STAFF'), validateQuery(utilQuerySchema), asyncHandler(getAllUtils));
+router.get("/utils", authenticateToken, authorize('ADMIN'), validateQuery(utilQuerySchema), asyncHandler(getAllUtils));
 
 // Lấy utility theo ID
-router.get("/utils/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(utilParamsSchema), asyncHandler(getUtilById));
+router.get("/utils/:id", authenticateToken, authorize('ADMIN'), validateParams(utilParamsSchema), asyncHandler(getUtilById));
 
 // Tạo utility mới
-router.post("/utils", authenticateToken, authorize('ADMIN', 'STAFF'), validateBody(createUtilSchema), asyncHandler(createUtil));
+router.post("/utils", authenticateToken, authorize('ADMIN'), validateBody(createUtilSchema), asyncHandler(createUtil));
 
 // Cập nhật utility
-router.put("/utils/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(utilParamsSchema), validateBody(updateUtilSchema), asyncHandler(updateUtil));
+router.put("/utils/:id", authenticateToken, authorize('ADMIN'), validateParams(utilParamsSchema), validateBody(updateUtilSchema), asyncHandler(updateUtil));
 
 // Xóa utility (soft delete)
-router.delete("/utils/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(utilParamsSchema), asyncHandler(deleteUtil));
+router.delete("/utils/:id", authenticateToken, authorize('ADMIN'), validateParams(utilParamsSchema), asyncHandler(deleteUtil));
 
 // Lấy utilities theo room
-router.get("/rooms/:roomId/utils", authenticateToken, authorize('ADMIN', 'STAFF'), asyncHandler(getUtilsByRoom));
+router.get("/rooms/:roomId/utils", authenticateToken, authorize('ADMIN'), asyncHandler(getUtilsByRoom));
 
 // Lấy danh sách utilities bị hỏng
-router.get("/utils/broken", authenticateToken, authorize('ADMIN', 'STAFF'), validateQuery(utilQuerySchema), asyncHandler(getBrokenUtils));
+router.get("/utils/broken", authenticateToken, authorize('ADMIN'), validateQuery(utilQuerySchema), asyncHandler(getBrokenUtils));
 
 // Cập nhật condition của utility
-router.patch("/utils/:id/condition", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(utilParamsSchema), validateBody(
+router.patch("/utils/:id/condition", authenticateToken, authorize('ADMIN'), validateParams(utilParamsSchema), validateBody(
     Joi.object({
         condition: Joi.string().valid('new', 'used', 'broken').required(),
         notes: Joi.string().trim().max(1000).optional(),

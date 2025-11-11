@@ -258,41 +258,80 @@ export const updateBill = async (req, res) => {
   }
 };
 
-// Xóa hóa đơn
-export const deleteBill = async (req, res) => {
+// Xác nhận tiền mặt cho phiếu thu (RECEIPT) ở trạng thái PENDING_CASH_CONFIRM
+export const confirmCashReceipt = async (req, res) => {
   try {
-    if (!req.user || req.user.role !== "ADMIN") {
-      return res.status(403).json({
-        message: "Bạn không có quyền xóa hóa đơn.",
-        success: false,
-      });
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
-    const bill = await Bill.findById(req.params.id);
-    if (!bill) {
-      return res.status(404).json({
-        message: "Không tìm thấy hóa đơn để xóa",
-        success: false,
-      });
+    const bill = await Bill.findById(req.params.id).populate("contractId");
+    if (!bill) return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
+
+    if (bill.billType !== "RECEIPT") {
+      return res.status(400).json({ success: false, message: "Chỉ xác nhận tiền mặt cho bill phiếu thu (RECEIPT)" });
     }
-    if (bill.status === "UNPAID" || bill.status === "PARTIALLY_PAID") {
-      return res.status(400).json({
-        message: "Hóa đơn chưa thanh toán hoặc thanh toán một phần, không thể xóa",
-        success: false,
-      });
+    if (bill.status !== "PENDING_CASH_CONFIRM") {
+      return res.status(400).json({ success: false, message: "Bill không ở trạng thái chờ xác nhận tiền mặt" });
     }
 
-    await Bill.findByIdAndDelete(req.params.id);
+    const due = convertDecimal128(bill.amountDue) || 0;
+    const paid = convertDecimal128(bill.amountPaid) || 0;
+    const transfer = Math.max(due - paid, 0);
 
-    res.status(200).json({
-      message: "Xóa hóa đơn thành công",
-      success: true,
-    });
+    // Cập nhật trạng thái và tiền
+    bill.status = "PAID";
+    bill.amountPaid = mongoose.Types.Decimal128.fromString(String(paid + transfer));
+    bill.amountDue = mongoose.Types.Decimal128.fromString("0");
+    bill.payments = [
+      ...(bill.payments || []),
+      {
+        paidAt: new Date(),
+        amount: mongoose.Types.Decimal128.fromString(String(transfer)),
+        method: "CASH",
+        provider: "OFFLINE",
+        transactionId: `cash-${Date.now()}`,
+        note: "Xác nhận tiền mặt bởi ADMIN",
+      },
+    ];
+
+    await bill.save();
+
+    return res.status(200).json({ success: true, message: "Xác nhận tiền mặt thành công", data: formatBill(bill) });
   } catch (err) {
-    res.status(400).json({
-      message: "Không thể xóa hóa đơn",
-      success: false,
-      error: err.message,
-    });
+    return res.status(500).json({ success: false, message: "Lỗi xác nhận tiền mặt", error: err.message });
   }
 };
+
+// Hủy hóa đơn (cancel) — chuyển trạng thái sang VOID
+export const cancelBill = async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền hủy hóa đơn" });
+    }
+
+    const bill = await Bill.findById(req.params.id).populate("contractId");
+    if (!bill) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
+    }
+
+    if (bill.status === "VOID") {
+      return res.status(200).json({ success: true, message: "Hóa đơn đã bị hủy trước đó", data: formatBill(bill) });
+    }
+
+    // Không cho hủy nếu đã thanh toán một phần hoặc toàn bộ
+    if (bill.status === "PARTIALLY_PAID" || bill.status === "PAID") {
+      return res.status(400).json({ success: false, message: "Không thể hủy hóa đơn đã thanh toán" });
+    }
+
+    bill.status = "VOID";
+    bill.updatedAt = new Date();
+    await bill.save();
+    return res.status(200).json({ success: true, message: "Đã hủy hóa đơn", data: formatBill(bill) });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Lỗi khi hủy hóa đơn", error: err.message });
+  }
+};
+
+// (ĐÃ BỎ) Delete bill: không dùng trong nghiệp vụ — route đã gỡ bỏ

@@ -29,11 +29,11 @@ const router = express.Router();
 // Public routes đã được tách ra file riêng: room.public.route.js
 // KHÔNG DÙNG router.use() vì nó sẽ áp dụng cho TẤT CẢ route kể cả /rooms/public
 // Thay vào đó, thêm middleware trực tiếp vào từng route
-router.get("/rooms", authenticateToken, authorize('ADMIN', 'STAFF'), validateQuery(roomQuerySchema), asyncHandler(getAllRooms));
-router.get("/rooms/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(roomParamsSchema), asyncHandler(getRoomById));
-router.post("/rooms", authenticateToken, authorize('ADMIN', 'STAFF'), uploadRoomImages, validateBody(createRoomSchema), asyncHandler(createRoom));
-router.put("/rooms/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(roomParamsSchema), uploadRoomImages, validateBody(updateRoomSchema), asyncHandler(updateRoom));
-router.delete("/rooms/:id", authenticateToken, authorize('ADMIN', 'STAFF'), validateParams(roomParamsSchema), asyncHandler(deleteRoom));
+router.get("/rooms", authenticateToken, authorize('ADMIN'), validateQuery(roomQuerySchema), asyncHandler(getAllRooms));
+router.get("/rooms/:id", authenticateToken, authorize('ADMIN'), validateParams(roomParamsSchema), asyncHandler(getRoomById));
+router.post("/rooms", authenticateToken, authorize('ADMIN'), uploadRoomImages, validateBody(createRoomSchema), asyncHandler(createRoom));
+router.put("/rooms/:id", authenticateToken, authorize('ADMIN'), validateParams(roomParamsSchema), uploadRoomImages, validateBody(updateRoomSchema), asyncHandler(updateRoom));
+router.delete("/rooms/:id", authenticateToken, authorize('ADMIN'), validateParams(roomParamsSchema), asyncHandler(deleteRoom));
 
 // Image management (cần admin/staff)
 import { removeRoomImage, setRoomCoverImage } from "../controllers/room.controller.js";
@@ -41,7 +41,7 @@ import { removeRoomImage, setRoomCoverImage } from "../controllers/room.controll
 router.delete(
   "/rooms/:id/images/:publicId",
   authenticateToken,
-  authorize('ADMIN', 'STAFF'),
+  authorize('ADMIN'),
   validateParams(roomImageParamsSchema),
   asyncHandler(removeRoomImage)
 );
@@ -49,7 +49,7 @@ router.delete(
 router.post(
   "/rooms/:id/cover",
   authenticateToken,
-  authorize('ADMIN', 'STAFF'),
+  authorize('ADMIN'),
   validateParams(roomParamsSchema),
   validateBody(setCoverBodySchema),
   asyncHandler(setRoomCoverImage)

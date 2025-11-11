@@ -2,14 +2,16 @@ import express from "express";
 import {
   uploadFiles,
   uploadCCCDFile,
-  approveOwnerSigned,
   getRemainingAmount,
+  deleteFinalContractById,
+  assignTenantToFinalContract,
 } from "../controllers/finalContract.controller.js";
-import { finalContractParamsSchema } from "../validations/finalContract.validation.js";
-import { validateParams } from "../middleware/validation.middleware.js";
+import { finalContractParamsSchema, deleteFileParamsSchema, assignTenantSchema } from "../validations/finalContract.validation.js";
+import { validateParams, validateBody } from "../middleware/validation.middleware.js";
 import { authenticateToken, authorize } from "../middleware/auth.middleware.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
 import { uploadFinalContractFiles, uploadCCCDFiles } from "../middleware/upload.middleware.js";
+import { deleteFileFromFinalContract } from "../controllers/finalContract.controller.js";
 
 const router = express.Router();
 
@@ -17,6 +19,7 @@ const router = express.Router();
 router.post(
   "/final-contracts/:id/upload",
   authenticateToken,
+  authorize('ADMIN'),
   validateParams(finalContractParamsSchema),
   uploadFinalContractFiles,
   asyncHandler(uploadFiles)
@@ -26,19 +29,13 @@ router.post(
 router.post(
   "/final-contracts/:id/upload-cccd",
   authenticateToken,
+  authorize('ADMIN'),
   validateParams(finalContractParamsSchema),
   uploadCCCDFiles,
   asyncHandler(uploadCCCDFile)
 );
 
-// Admin/Manager approves owner signature
-router.put(
-  "/final-contracts/:id/approve",
-  authenticateToken,
-  authorize('ADMIN', 'STAFF'),
-  validateParams(finalContractParamsSchema),
-  asyncHandler(approveOwnerSigned)
-);
+// (Removed) approve route: upload now finalizes contract (SIGNED)
 
 // Remaining balance after deposit
 router.get(
@@ -48,4 +45,41 @@ router.get(
   asyncHandler(getRemainingAmount)
 );
 
+// Admin/Staff delete a final contract and attached files
+router.delete(
+  "/final-contracts/:id",
+  authenticateToken,
+  authorize('ADMIN'),
+  validateParams(finalContractParamsSchema),
+  asyncHandler(deleteFinalContractById)
+);
+
+// Admin/Staff delete a single file from final contract
+router.delete(
+  "/final-contracts/:id/files/:type/:index",
+  authenticateToken,
+  authorize('ADMIN'),
+  validateParams(deleteFileParamsSchema),
+  asyncHandler(deleteFileFromFinalContract)
+);
+
+// Assign tenant to final contract
+router.put(
+  "/final-contracts/:id/assign-tenant",
+  authenticateToken,
+  authorize('ADMIN'),
+  validateParams(finalContractParamsSchema),
+  validateBody(assignTenantSchema),
+  asyncHandler(assignTenantToFinalContract)
+);
+
 export default router;
+// Assign tenant to final contract
+router.put(
+  "/final-contracts/:id/assign-tenant",
+  authenticateToken,
+  authorize('ADMIN'),
+  validateParams(finalContractParamsSchema),
+  validateBody(assignTenantSchema),
+  asyncHandler(assignTenantToFinalContract)
+);

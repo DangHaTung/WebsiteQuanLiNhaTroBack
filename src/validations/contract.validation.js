@@ -4,10 +4,10 @@ import Joi from 'joi';
 export const createContractSchema = Joi.object({
   tenantId: Joi.string()
     .pattern(/^[0-9a-fA-F]{24}$/)
-    .required()
+    .optional()
+    .allow(null)
     .messages({
       'string.pattern.base': 'TenantId phải là ObjectId hợp lệ',
-      'any.required': 'TenantId là bắt buộc',
     }),
 
   roomId: Joi.string()
@@ -91,6 +91,18 @@ export const createContractSchema = Joi.object({
     .optional()
     .messages({
       'object.base': 'PricingSnapshot phải là object',
+    }),
+
+  tenantSnapshot: Joi.object({
+    fullName: Joi.string().trim().max(100).optional(),
+    phone: Joi.string().trim().max(30).optional(),
+    email: Joi.string().email().optional(),
+    identityNo: Joi.string().trim().max(50).optional(),
+    note: Joi.string().trim().max(500).optional(),
+  })
+    .optional()
+    .messages({
+      'object.base': 'TenantSnapshot phải là object',
     }),
 });
 
@@ -179,6 +191,18 @@ export const updateContractSchema = Joi.object({
     .optional()
     .messages({
       'object.base': 'PricingSnapshot phải là object',
+    }),
+
+  tenantSnapshot: Joi.object({
+    fullName: Joi.string().trim().max(100).optional(),
+    phone: Joi.string().trim().max(30).optional(),
+    email: Joi.string().email().optional(),
+    identityNo: Joi.string().trim().max(50).optional(),
+    note: Joi.string().trim().max(500).optional(),
+  })
+    .optional()
+    .messages({
+      'object.base': 'TenantSnapshot phải là object',
     }),
 })
   .min(1)

@@ -1,5 +1,7 @@
 import bcrypt from "bcrypt";
 import User from "../models/user.model.js";
+import Contract from "../models/contract.model.js";
+import Bill from "../models/bill.model.js";
 
 // Lấy danh sách người dùng (hỗ trợ phân trang, lọc role, tìm kiếm keyword)
 export const getAllUsers = async (req, res) => {
@@ -202,6 +204,44 @@ export const deleteUser = async (req, res) => {
     res.status(200).json({ success: true, message: "Xóa người dùng thành công" });
   } catch (error) {
     res.status(500).json({ success: false, message: "Lỗi khi xóa người dùng", error: error.message });
+  }
+};
+
+// Kích hoạt tài khoản Tenant sau khi bill_contract = PAID
+export const activateTenantIfContractBillPaid = async (req, res) => {
+  try {
+    if (!req.user || req.user.role.toUpperCase() !== "ADMIN") {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền kích hoạt tài khoản" });
+    }
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ success: false, message: "Không tìm thấy người dùng" });
+    if ((user.role || "").toUpperCase() !== "TENANT") {
+      return res.status(400).json({ success: false, message: "Chỉ kích hoạt được tài khoản TENANT" });
+    }
+
+    // Tìm các hợp đồng của tenant
+    const contracts = await Contract.find({ tenantId: user._id }).select("_id");
+    if (!contracts.length) {
+      return res.status(400).json({ success: false, message: "Tenant chưa có hợp đồng" });
+    }
+
+    // Kiểm tra có bill_contract PAID hay không
+    const contractIds = contracts.map((c) => c._id);
+    const paidContractBill = await Bill.findOne({
+      contractId: { $in: contractIds },
+      billType: "CONTRACT",
+      status: "PAID",
+    });
+    if (!paidContractBill) {
+      return res.status(400).json({ success: false, message: "Chưa thanh toán bill hợp đồng (CONTRACT)" });
+    }
+
+    user.isActive = true;
+    await user.save();
+    return res.status(200).json({ success: true, message: "Đã kích hoạt tài khoản Tenant", data: { id: user._id, isActive: user.isActive } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Lỗi khi kích hoạt tài khoản", error: error.message });
   }
 };
 

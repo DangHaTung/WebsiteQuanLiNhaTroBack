@@ -18,11 +18,18 @@ export const createBillSchema = Joi.object({
       'any.required': 'BillingDate là bắt buộc',
     }),
 
+  billType: Joi.string()
+    .valid('RECEIPT', 'CONTRACT', 'MONTHLY')
+    .default('MONTHLY')
+    .messages({
+      'any.only': 'BillType phải là RECEIPT, CONTRACT hoặc MONTHLY',
+    }),
+
   status: Joi.string()
-    .valid('UNPAID', 'PARTIALLY_PAID', 'PAID', 'VOID')
+    .valid('UNPAID', 'PARTIALLY_PAID', 'PAID', 'VOID', 'PENDING_CASH_CONFIRM')
     .default('UNPAID')
     .messages({
-      'any.only': 'Status phải là UNPAID, PARTIALLY_PAID, PAID hoặc VOID',
+      'any.only': 'Status phải là UNPAID, PARTIALLY_PAID, PAID, VOID hoặc PENDING_CASH_CONFIRM',
     }),
 
   lineItems: Joi.array()
@@ -114,10 +121,10 @@ export const createBillSchema = Joi.object({
             'any.required': 'Amount là bắt buộc',
           }),
         method: Joi.string()
-          .valid('CASH', 'BANK', 'MOMO', 'OTHER')
+          .valid('CASH', 'BANK', 'MOMO', 'VNPAY', 'ZALOPAY', 'OTHER', 'REDIRECT')
           .required()
           .messages({
-            'any.only': 'Method phải là CASH, BANK, MOMO hoặc OTHER',
+            'any.only': 'Method phải là CASH, BANK, MOMO, VNPAY, ZALOPAY, OTHER hoặc REDIRECT',
             'any.required': 'Method là bắt buộc',
           }),
         note: Joi.string()
@@ -158,10 +165,10 @@ export const updateBillSchema = Joi.object({
     }),
 
   status: Joi.string()
-    .valid('UNPAID', 'PARTIALLY_PAID', 'PAID', 'VOID')
+    .valid('UNPAID', 'PARTIALLY_PAID', 'PAID', 'VOID', 'PENDING_CASH_CONFIRM')
     .optional()
     .messages({
-      'any.only': 'Status phải là UNPAID, PARTIALLY_PAID, PAID hoặc VOID',
+      'any.only': 'Status phải là UNPAID, PARTIALLY_PAID, PAID, VOID hoặc PENDING_CASH_CONFIRM',
     }),
 
   lineItems: Joi.array()
@@ -239,9 +246,9 @@ export const updateBillSchema = Joi.object({
             'number.positive': 'Amount phải là số dương',
           }),
         method: Joi.string()
-          .valid('CASH', 'BANK', 'MOMO', 'OTHER')
+          .valid('CASH', 'BANK', 'MOMO', 'VNPAY', 'ZALOPAY', 'OTHER', 'REDIRECT')
           .messages({
-            'any.only': 'Method phải là CASH, BANK, MOMO hoặc OTHER',
+            'any.only': 'Method phải là CASH, BANK, MOMO, VNPAY, ZALOPAY, OTHER hoặc REDIRECT',
           }),
         note: Joi.string()
           .max(200)
