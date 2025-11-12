@@ -24,6 +24,8 @@ import { errorHandler, notFound, requestLogger } from "./middleware/error.middle
 import payRouter from "./routers/payment.route.js";
 import checkinPublicRoute from "./routers/checkin.public.route.js"; // PUBLIC checkin routes
 import finalContractRoute from "./routers/finalContract.route.js"; // PROTECTED final contract routes
+import monthlyBillRoute from "./routers/monthlyBill.route.js"; // Monthly bill generation routes
+import { scheduleMonthlyBillingJob } from "./jobs/monthlyBilling.job.js"; // Cron job tự động tạo hóa đơn
 
 
 
@@ -63,6 +65,7 @@ app.use("/api/admin/complaints", complaintRoute); // ADMIN complaint routes
 app.use("/api", utilRoute); // ADMIN utility routes
 app.use("/api", utilityFeeRoute); // ADMIN utility fee routes (independent from room utilities)
 app.use("/api", roomFeeRoute); // ADMIN room fee routes
+app.use("/api", monthlyBillRoute); // ADMIN monthly bill generation routes
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);
@@ -83,6 +86,14 @@ mongoose
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
       console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`);
+      
+      // Khởi động cron job tự động tạo hóa đơn hàng tháng
+      if (process.env.ENABLE_MONTHLY_BILLING_JOB !== 'false') {
+        scheduleMonthlyBillingJob();
+        console.log('✅ Cron job tạo hóa đơn hàng tháng đã được kích hoạt');
+      } else {
+        console.log('⚠️  Cron job tạo hóa đơn hàng tháng đã bị tắt (ENABLE_MONTHLY_BILLING_JOB=false)');
+      }
     });
   })
   .catch((err) => {
