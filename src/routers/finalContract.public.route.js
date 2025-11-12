@@ -2,14 +2,23 @@ import express from "express";
 import {
   createFromContract,
   getFinalContractById,
+  getMyFinalContracts,
   viewFileInline,
 } from "../controllers/finalContract.controller.js";
 import { createFinalContractSchema, finalContractParamsSchema, viewFileParamsSchema } from "../validations/finalContract.validation.js";
-import { validateBody, validateParams } from "../middleware/validation.middleware.js";
+import { validateBody, validateParams, validatePagination } from "../middleware/validation.middleware.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
 import { authenticateToken } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
+
+// Get my final contracts (Tenant)
+router.get(
+  "/final-contracts/my-contracts",
+  authenticateToken,
+  validatePagination(),
+  asyncHandler(getMyFinalContracts)
+);
 
 // Create final contract draft from existing contract (tenant after deposit)
 router.post(
