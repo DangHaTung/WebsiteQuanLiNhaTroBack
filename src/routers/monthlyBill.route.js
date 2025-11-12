@@ -5,6 +5,7 @@ import {
   createSingleMonthlyBill,
   createBatchMonthlyBills,
   autoGenerateMonthlyBills,
+  sendBillNotification,
 } from "../controllers/monthlyBill.controller.js";
 import {
   createSingleBillSchema,
@@ -77,6 +78,17 @@ router.post(
   authorize("ADMIN", "STAFF"),
   validateBody(autoGenerateBillsSchema),
   asyncHandler(autoGenerateMonthlyBills)
+);
+
+/**
+ * Gửi email thông báo hóa đơn cho tenant (thủ công)
+ * POST /api/monthly-bills/send-notification/:billId
+ */
+router.post(
+  "/monthly-bills/send-notification/:billId",
+  authenticateToken,
+  authorize("ADMIN", "STAFF"),
+  asyncHandler(sendBillNotification)
 );
 
 export default router;

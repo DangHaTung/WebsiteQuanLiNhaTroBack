@@ -6,6 +6,10 @@ import {
   calculateRoomMonthlyFees,
 } from "../services/billing/monthlyBill.service.js";
 import Contract from "../models/contract.model.js";
+import Bill from "../models/bill.model.js";
+import Room from "../models/room.model.js";
+import User from "../models/user.model.js";
+import { sendBillNotificationToTenant } from "../services/email/notification.service.js";
 
 const toNum = (d) => (d === null || d === undefined ? 0 : parseFloat(d.toString()));
 
@@ -231,11 +235,120 @@ export const autoGenerateMonthlyBills = async (req, res) => {
   }
 };
 
+/**
+ * Gửi email thông báo hóa đơn cho tenant (thủ công)
+ * POST /api/monthly-bills/send-notification/:billId
+ */
+export const sendBillNotification = async (req, res) => {
+  try {
+    const { billId } = req.params;
+    
+    // Validate billId
+    if (!mongoose.Types.ObjectId.isValid(billId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Bill ID không hợp lệ",
+      });
+    }
+    
+    // Lấy thông tin bill
+    const bill = await Bill.findById(billId).populate('contractId');
+    if (!bill) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy hóa đơn",
+      });
+    }
+    
+    // Kiểm tra bill type
+    if (bill.billType !== 'MONTHLY') {
+      return res.status(400).json({
+        success: false,
+        message: "Chỉ gửi thông báo cho hóa đơn hàng tháng",
+      });
+    }
+    
+    // Lấy thông tin contract
+    const contract = bill.contractId;
+    if (!contract) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy hợp đồng liên kết",
+      });
+    }
+    
+    // Lấy thông tin tenant
+    const tenant = await User.findById(contract.tenantId);
+    if (!tenant) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy thông tin người thuê",
+      });
+    }
+    
+    if (!tenant.email) {
+      return res.status(400).json({
+        success: false,
+        message: "Người thuê chưa có email",
+      });
+    }
+    
+    // Lấy thông tin phòng
+    const room = await Room.findById(contract.roomId);
+    if (!room) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy thông tin phòng",
+      });
+    }
+    
+    // Gửi email
+    const emailResult = await sendBillNotificationToTenant({
+      tenant,
+      bill: {
+        ...bill.toObject(),
+        amountDue: toNum(bill.amountDue),
+        billingDate: bill.billingDate,
+        status: bill.status,
+      },
+      room,
+    });
+    
+    if (!emailResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: "Không thể gửi email",
+        error: emailResult.error || emailResult.message,
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Đã gửi email thông báo thành công",
+      data: {
+        billId: bill._id,
+        tenantEmail: tenant.email,
+        tenantName: tenant.fullName,
+        roomNumber: room.roomNumber,
+        sentAt: new Date(),
+      },
+    });
+  } catch (error) {
+    console.error("Error sending bill notification:", error);
+    res.status(500).json({
+      success: false,
+      message: "Lỗi khi gửi thông báo",
+      error: error.message,
+    });
+  }
+};
+
 export default {
   previewMonthlyBill,
   createSingleMonthlyBill,
   createBatchMonthlyBills,
   autoGenerateMonthlyBills,
+  sendBillNotification,
 };
 
 /**
