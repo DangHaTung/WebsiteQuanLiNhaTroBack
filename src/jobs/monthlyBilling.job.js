@@ -2,6 +2,7 @@
 import cron from 'node-cron';
 import { createMonthlyBillsForAllRooms } from '../services/billing/monthlyBill.service.js';
 import { sendEmailNotification } from '../services/email/notification.service.js';
+import { sendNewBillNotification } from '../services/notification/rentReminder.service.js';
 
 /**
  * Cron job tự động tạo hóa đơn hàng tháng
@@ -9,7 +10,7 @@ import { sendEmailNotification } from '../services/email/notification.service.js
  */
 export function scheduleMonthlyBillingJob() {
   // Cron expression: '0 0 1 * *' = 00:00 ngày 1 hàng tháng
-  const cronExpression = process.env.MONTHLY_BILLING_CRON || '0 0 1 * *';
+  const cronExpression = process.env.MONTHLY_BILLING_CRON || '0 0 5 * *';
   
   console.log(`📅 Đã thiết lập cron job tạo hóa đơn hàng tháng: ${cronExpression}`);
   
@@ -29,6 +30,23 @@ export function scheduleMonthlyBillingJob() {
       console.log(`   - Đã tạo: ${results.summary.created} hóa đơn`);
       console.log(`   - Bỏ qua: ${results.summary.skipped} hóa đơn`);
       console.log(`   - Lỗi: ${results.summary.errors} hóa đơn`);
+      
+      // Gửi thông báo real-time cho các hóa đơn mới được tạo
+      console.log('\n📤 Gửi thông báo real-time cho hóa đơn mới...');
+      for (const billInfo of results.success) {
+        try {
+          if (billInfo.tenant) {
+            await sendNewBillNotification(
+              { _id: billInfo.billId, billingDate: new Date(), amountDue: billInfo.totalAmount, status: 'UNPAID' },
+              billInfo.tenant,
+              { roomNumber: billInfo.roomNumber }
+            );
+          }
+        } catch (notifError) {
+          console.error(`❌ Lỗi gửi thông báo cho bill ${billInfo.billId}:`, notifError.message);
+        }
+      }
+      console.log('✅ Hoàn tất gửi thông báo real-time');
       
       // Gửi email thông báo cho admin (nếu có lỗi)
       if (results.summary.errors > 0 || results.summary.skipped > 0) {
