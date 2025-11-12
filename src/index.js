@@ -1,6 +1,7 @@
 import 'dotenv/config';
 // dotenv.config();
 import express from "express";
+import { createServer } from "http";
 import mongoose from "mongoose";
 import cors from "cors";
 import authRoute from "./routers/auth.route.js";
@@ -25,11 +26,16 @@ import payRouter from "./routers/payment.route.js";
 import checkinPublicRoute from "./routers/checkin.public.route.js"; // PUBLIC checkin routes
 import finalContractRoute from "./routers/finalContract.route.js"; // PROTECTED final contract routes
 import monthlyBillRoute from "./routers/monthlyBill.route.js"; // Monthly bill generation routes
+import notificationRoute from "./routers/notification.route.js"; // Notification routes
 import { scheduleMonthlyBillingJob } from "./jobs/monthlyBilling.job.js"; // Cron job tự động tạo hóa đơn
+import { scheduleRentReminderJob } from "./jobs/rentReminder.job.js"; // Cron job nhắc nhở thanh toán
+import { scheduleUpcomingBillJob } from "./jobs/upcomingBill.job.js"; // Cron job thông báo hóa đơn sắp tới
+import { initializeSocketIO } from "./services/socket/socket.service.js"; // Socket.io service
 
 
 
 const app = express();
+const httpServer = createServer(app);
 
 // Middleware logging request
 app.use(requestLogger);
@@ -66,6 +72,7 @@ app.use("/api", utilRoute); // ADMIN utility routes
 app.use("/api", utilityFeeRoute); // ADMIN utility fee routes (independent from room utilities)
 app.use("/api", roomFeeRoute); // ADMIN room fee routes
 app.use("/api", monthlyBillRoute); // ADMIN monthly bill generation routes
+app.use("/api/notifications", notificationRoute); // Notification routes (Socket.io testing & rent reminders)
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);
@@ -83,8 +90,15 @@ mongoose
     const info = conn?.host ? `${conn.host}:${conn?.port}` : 'unknown-host';
     // In ra thông tin DB để đối chiếu với Compass
     console.log(`📦 Đang dùng DB: ${conn.name} @ ${info}`);
+    
     const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => {
+    
+    // Khởi tạo Socket.io
+    initializeSocketIO(httpServer);
+    console.log('✅ Socket.io đã được khởi tạo');
+    
+    // Khởi động HTTP server (thay vì app.listen)
+    httpServer.listen(PORT, () => {
       console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`);
       
       // Khởi động cron job tự động tạo hóa đơn hàng tháng
@@ -93,6 +107,22 @@ mongoose
         console.log('✅ Cron job tạo hóa đơn hàng tháng đã được kích hoạt');
       } else {
         console.log('⚠️  Cron job tạo hóa đơn hàng tháng đã bị tắt (ENABLE_MONTHLY_BILLING_JOB=false)');
+      }
+      
+      // Khởi động cron job nhắc nhở thanh toán
+      if (process.env.ENABLE_RENT_REMINDER_JOB !== 'false') {
+        scheduleRentReminderJob();
+        console.log('✅ Cron job nhắc nhở thanh toán đã được kích hoạt');
+      } else {
+        console.log('⚠️  Cron job nhắc nhở thanh toán đã bị tắt (ENABLE_RENT_REMINDER_JOB=false)');
+      }
+      
+      // Khởi động cron job thông báo hóa đơn sắp tới
+      if (process.env.ENABLE_UPCOMING_BILL_JOB !== 'false') {
+        scheduleUpcomingBillJob();
+        console.log('✅ Cron job thông báo hóa đơn sắp tới đã được kích hoạt (ngày 29 và ngày 3)');
+      } else {
+        console.log('⚠️  Cron job thông báo hóa đơn sắp tới đã bị tắt (ENABLE_UPCOMING_BILL_JOB=false)');
       }
     });
   })
