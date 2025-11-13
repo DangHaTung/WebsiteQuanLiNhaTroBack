@@ -1,5 +1,5 @@
 import express from "express";
-import { getAllBills, getBillById, createBill, updateBill, getMyBills, confirmCashReceipt, cancelBill } from "../controllers/bill.controller.js";
+import { getAllBills, getBillById, createBill, updateBill, getMyBills, confirmCashReceipt, confirmCashPayment, cancelBill } from "../controllers/bill.controller.js";
 import { 
   createBillSchema, 
   updateBillSchema, 
@@ -35,8 +35,10 @@ router.post("/bills/publish-batch", authenticateToken, authorize('ADMIN'), async
   const { publishBatchDraftBills } = await import("../controllers/bill.controller.js");
   return publishBatchDraftBills(req, res);
 }));
-// Xác nhận tiền mặt cho bill phiếu thu
+// Xác nhận tiền mặt cho bill phiếu thu (RECEIPT only)
 router.post("/bills/:id/confirm-cash", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(confirmCashReceipt));
+// Xác nhận thanh toán tiền mặt cho bất kỳ bill nào
+router.post("/bills/:id/confirm-payment", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(confirmCashPayment));
 // Hủy hóa đơn (cancel) thay cho delete
 router.put("/bills/:id/cancel", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(cancelBill));
 

@@ -362,4 +362,84 @@ export const cancelCheckin = async (req, res) => {
   }
 };
 
-export default { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSampleDocx, cancelCheckin };
+// Get all checkins (Admin only) with pagination
+export const getAllCheckins = async (req, res) => {
+  try {
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin) return res.status(403).json({ success: false, message: "Forbidden" });
+
+    const { page = 1, limit = 10, status } = req.query;
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (status) filter.status = status;
+
+    const checkins = await Checkin.find(filter)
+      .populate("tenantId", "fullName email phone role")
+      .populate("staffId", "fullName email role")
+      .populate("roomId", "roomNumber pricePerMonth type floor areaM2")
+      .populate("contractId")
+      .populate("receiptBillId")
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    const total = await Checkin.countDocuments(filter);
+
+    // Convert Decimal128 to numbers
+    const formattedCheckins = checkins.map(c => {
+      const obj = c.toObject();
+      obj.deposit = obj.deposit ? parseFloat(obj.deposit.toString()) : 0;
+      obj.monthlyRent = obj.monthlyRent ? parseFloat(obj.monthlyRent.toString()) : 0;
+      return obj;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Lấy danh sách check-in thành công",
+      data: formattedCheckins,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalRecords: total,
+        limit: parseInt(limit),
+      },
+    });
+  } catch (err) {
+    console.error("getAllCheckins error:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+// Đánh dấu check-in hoàn thành
+export const completeCheckin = async (req, res) => {
+  try {
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin) return res.status(403).json({ success: false, message: "Forbidden" });
+
+    const { id } = req.params;
+    const checkin = await Checkin.findById(id);
+    if (!checkin) return res.status(404).json({ success: false, message: "Checkin not found" });
+
+    // Kiểm tra phiếu thu đã thanh toán chưa
+    if (!checkin.receiptBillId) {
+      return res.status(400).json({ success: false, message: "Chưa có phiếu thu để xác nhận" });
+    }
+    const bill = await Bill.findById(checkin.receiptBillId);
+    if (!bill) return res.status(404).json({ success: false, message: "Receipt bill not found" });
+    if (bill.status !== "PAID") {
+      return res.status(400).json({ success: false, message: "Phiếu thu chưa thanh toán — không thể hoàn thành check-in" });
+    }
+
+    // Đánh dấu hoàn thành
+    checkin.status = "COMPLETED";
+    await checkin.save();
+
+    return res.status(200).json({ success: true, message: "Đã đánh dấu check-in hoàn thành", data: checkin });
+  } catch (err) {
+    console.error("completeCheckin error:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+export default { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSampleDocx, cancelCheckin, getAllCheckins, completeCheckin };

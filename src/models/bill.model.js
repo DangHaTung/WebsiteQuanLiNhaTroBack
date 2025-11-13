@@ -5,6 +5,7 @@ const { Schema } = mongoose;
 const billSchema = new Schema(
   {
     contractId: { type: Schema.Types.ObjectId, ref: "Contract", required: true },
+    finalContractId: { type: Schema.Types.ObjectId, ref: "FinalContract" }, // Link to FinalContract if applicable
     billingDate: { type: Date, required: true },
 
     // Phân loại bill theo nghiệp vụ

@@ -313,6 +313,48 @@ export const confirmCashReceipt = async (req, res) => {
   }
 };
 
+// Xác nhận thanh toán tiền mặt cho bất kỳ bill nào (RECEIPT, CONTRACT, MONTHLY)
+export const confirmCashPayment = async (req, res) => {
+  try {
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const bill = await Bill.findById(req.params.id).populate("contractId");
+    if (!bill) return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
+
+    if (bill.status === "PAID") {
+      return res.status(400).json({ success: false, message: "Hóa đơn đã được thanh toán" });
+    }
+
+    const due = convertDecimal128(bill.amountDue) || 0;
+    const paid = convertDecimal128(bill.amountPaid) || 0;
+    const transfer = Math.max(due - paid, 0);
+
+    // Cập nhật trạng thái và tiền
+    bill.status = "PAID";
+    bill.amountPaid = mongoose.Types.Decimal128.fromString(String(paid + transfer));
+    bill.payments = [
+      ...(bill.payments || []),
+      {
+        paidAt: new Date(),
+        amount: mongoose.Types.Decimal128.fromString(String(transfer)),
+        method: "CASH",
+        provider: "OFFLINE",
+        transactionId: `cash-${Date.now()}`,
+        note: "Xác nhận thanh toán tiền mặt bởi ADMIN",
+      },
+    ];
+
+    await bill.save();
+
+    return res.status(200).json({ success: true, message: "Xác nhận thanh toán thành công", data: formatBill(bill) });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Lỗi xác nhận thanh toán", error: err.message });
+  }
+};
+
 // Hủy hóa đơn (cancel) — chuyển trạng thái sang VOID
 export const cancelBill = async (req, res) => {
   try {
@@ -560,6 +602,32 @@ export const getMyPendingPayment = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Lỗi khi lấy danh sách hóa đơn",
+      error: err.message,
+    });
+  }
+};
+
+// Lấy bills theo finalContractId
+export const getBillsByFinalContractId = async (req, res) => {
+  try {
+    const { finalContractId } = req.params;
+    
+    const bills = await Bill.find({ finalContractId })
+      .populate("contractId")
+      .sort({ createdAt: -1 });
+    
+    const formattedBills = bills.map(formatBill);
+    
+    return res.status(200).json({
+      success: true,
+      message: "Lấy bills theo FinalContract thành công",
+      data: formattedBills,
+    });
+  } catch (err) {
+    console.error("getBillsByFinalContractId error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi lấy bills",
       error: err.message,
     });
   }

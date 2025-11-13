@@ -1,9 +1,12 @@
 import express from "express";
 import { authenticateToken, authorize } from "../middleware/auth.middleware.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
-import { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSampleDocx, cancelCheckin } from "../controllers/checkin.controller.js";
+import { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSampleDocx, cancelCheckin, getAllCheckins, completeCheckin } from "../controllers/checkin.controller.js";
 
 const router = express.Router();
+
+// Get all checkins (Admin only)
+router.get("/checkins", authenticateToken, authorize('ADMIN'), asyncHandler(getAllCheckins));
 
 // Tạo hợp đồng + hóa đơn (đặt cọc + tháng đầu) khi thanh toán tiền mặt
 router.post("/checkin/cash", authenticateToken, authorize('ADMIN'), asyncHandler(createCashCheckin));
@@ -16,7 +19,8 @@ router.get("/checkins/:id/print-data", authenticateToken, authorize('ADMIN'), as
 // Tải hợp đồng mẫu DOCX
 router.get("/checkins/:id/sample-docx", authenticateToken, authorize('ADMIN'), asyncHandler(downloadSampleDocx));
 
-// (Bỏ) Endpoint scan cờ — không cần theo nghiệp vụ mới
+// Đánh dấu check-in hoàn thành
+router.put("/checkins/:id/complete", authenticateToken, authorize('ADMIN'), asyncHandler(completeCheckin));
 
 // Hủy check-in trước khi ký — mất 100% tiền cọc
 router.post("/checkins/:id/cancel", authenticateToken, authorize('ADMIN'), asyncHandler(cancelCheckin));

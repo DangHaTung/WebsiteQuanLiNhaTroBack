@@ -140,23 +140,22 @@ export const createFromContract = async (req, res) => {
       status: "DRAFT",
     });
 
-    // Create bill_contract for the first month rent, if not existing
-    const existingContractBill = await Bill.findOne({ contractId: contract._id, billType: "CONTRACT" });
-    if (!existingContractBill) {
-      await Bill.create({
-        contractId: contract._id,
-        billingDate: new Date(),
-        billType: "CONTRACT",
-        status: "UNPAID",
-        lineItems: [
-          { item: "Tiền thuê tháng đầu", quantity: 1, unitPrice: contract.monthlyRent, lineTotal: contract.monthlyRent },
-        ],
-        amountDue: contract.monthlyRent,
-        amountPaid: toDec(0),
-        payments: [],
-        note: "Bill hợp đồng (tháng đầu) được tạo khi sinh hợp đồng chính thức",
-      });
-    }
+    // Create bill_contract for the first month rent
+    // Mỗi FinalContract có 1 bill CONTRACT riêng
+    await Bill.create({
+      contractId: contract._id,
+      finalContractId: finalContract._id, // Link to this specific FinalContract
+      billingDate: new Date(),
+      billType: "CONTRACT",
+      status: "UNPAID",
+      lineItems: [
+        { item: "Tiền thuê tháng đầu", quantity: 1, unitPrice: contract.monthlyRent, lineTotal: contract.monthlyRent },
+      ],
+      amountDue: contract.monthlyRent,
+      amountPaid: toDec(0),
+      payments: [],
+      note: `Bill hợp đồng (tháng đầu) cho FinalContract ${finalContract._id}`,
+    });
 
     const populated = await FinalContract.findById(finalContract._id)
       .populate("tenantId", "fullName email phone role")

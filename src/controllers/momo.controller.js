@@ -87,12 +87,16 @@ const createPayment = async (req, res) => {
         if (!room)
             return res.status(400).json({ success: false, message: "Room liên kết không tồn tại" });
 
+        // Kiểm tra có thông tin tenant (từ tenantId hoặc tenantSnapshot)
         const tenantId = contract.tenantId || contract.tenant || contract.tenant_id;
-        if (!tenantId)
+        const tenantSnapshot = contract.tenantSnapshot;
+        
+        if (!tenantId && !tenantSnapshot) {
             return res.status(400).json({
                 success: false,
-                message: "Contract chưa có tenant, không thể thu tiền",
+                message: "Contract chưa có thông tin người thuê, không thể thu tiền",
             });
+        }
 
         // build momo config + orderId (unique)
         const { accessKey, secretKey, partnerCode, redirectUrl, ipnUrl } = getMomoConfig();

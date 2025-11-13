@@ -1,5 +1,5 @@
 import express from "express";
-import { getAllBills, getMyBills, getBillById } from "../controllers/bill.controller.js";
+import { getAllBills, getMyBills, getBillById, getBillsByFinalContractId } from "../controllers/bill.controller.js";
 import { validatePagination, validateParams } from "../middleware/validation.middleware.js";
 import { billParamsSchema } from "../validations/bill.validation.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
@@ -18,6 +18,9 @@ router.get("/bills/pending-payment", authenticateToken, asyncHandler(async (req,
   const { getMyPendingPayment } = await import("../controllers/bill.controller.js");
   return getMyPendingPayment(req, res);
 }));
+
+// Route: Lấy bills theo finalContractId
+router.get("/bills/final-contract/:finalContractId", authenticateToken, asyncHandler(getBillsByFinalContractId));
 
 export default router;
 

@@ -63,6 +63,17 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
             payment.status = "SUCCESS";
             payment.metadata = rawParams;
             await payment.save({ session });
+
+            // Tự động complete checkin nếu là bill RECEIPT đã PAID
+            if (bill.billType === "RECEIPT" && bill.status === "PAID") {
+                const Checkin = (await import("../models/checkin.model.js")).default;
+                const checkin = await Checkin.findOne({ receiptBillId: bill._id }).session(session);
+                if (checkin && checkin.status === "CREATED") {
+                    checkin.status = "COMPLETED";
+                    await checkin.save({ session });
+                    console.log(`✅ Auto-completed checkin ${checkin._id} after payment`);
+                }
+            }
         });
     } catch (err) {
         // fallback nếu MongoDB không hỗ trợ transaction
