@@ -38,34 +38,19 @@ const formatFinalContract = (fc) => {
     if (!base) return file;
     // Robustly detect resource type even if old records miss resource_type/format
     const isRawByUrl = base.includes("/raw/upload/");
-    const isImageByUrl = base.includes("/image/upload/");
     const isRaw = file?.resource_type ? file.resource_type === "raw" : isRawByUrl;
-    const isImage = file?.resource_type ? file.resource_type === "image" : isImageByUrl;
-    // Cloudinary expects flags in the URL PATH, not query string.
-    // Build a friendly filename WITH extension when available (prevents wrong app association on other machines)
-    const basename = (file?.public_id || "download").split("/").pop();
-    // Determine extension
-    let ext = "";
-    if (file?.format) {
-      ext = `.${file.format}`;
-    } else if (isRaw) {
-      ext = ".pdf";
-    } else {
-      const match = base.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
-      ext = match ? `.${match[1]}` : "";
-    }
-    const filenameWithExt = `${basename}${ext}`;
 
     // Download: force attachment (do not include extension in flag param to avoid 400)
     const downloadUrl = base.replace("/upload/", "/upload/fl_attachment/");
 
-    // Inline view:
-    // - Images: base URL already delivers inline → reuse base
-    // - PDFs (raw): use preview image URL for inline viewing
-    // Inline: unify behavior — always equal to base
-    const inlineUrl = base;
+    // Inline view: Remove fl_attachment if exists, then add fl_inline for PDFs
+    let inlineUrl = base.replace("/upload/fl_attachment/", "/upload/");
+    if (isRaw || file?.format === "pdf") {
+      // For PDFs, ensure fl_inline flag for browser viewing
+      inlineUrl = inlineUrl.replace("/upload/", "/upload/fl_inline/");
+    }
 
-    return { ...file, viewUrl: base, downloadUrl, inlineUrl };
+    return { ...file, viewUrl: inlineUrl, downloadUrl, inlineUrl };
   };
   if (Array.isArray(obj.images)) {
     obj.images = obj.images.map(addFileLinks);
@@ -258,7 +243,7 @@ export const uploadCCCDFile = async (req, res) => {
 // Stream a file inline (primarily for PDFs uploaded as raw)
 export const viewFileInline = async (req, res) => {
   try {
-    const { id, index } = req.params;
+    const { id, type, index } = req.params;
     const idx = parseInt(index, 10);
     const fc = await FinalContract.findById(id);
     if (!fc) return res.status(404).json({ success: false, message: "Final contract not found" });
@@ -267,7 +252,8 @@ export const viewFileInline = async (req, res) => {
     const isOwnerTenant = fc.tenantId?.toString() === req.user?._id?.toString();
     if (!isAdmin && !isOwnerTenant) return res.status(403).json({ success: false, message: "Forbidden" });
 
-    const files = fc.images || [];
+    // Select correct file array based on type
+    const files = type === "cccd" ? (fc.cccdFiles || []) : (fc.images || []);
     if (idx < 0 || idx >= files.length) {
       return res.status(404).json({ success: false, message: "File not found" });
     }
@@ -275,14 +261,14 @@ export const viewFileInline = async (req, res) => {
     const base = file?.secure_url || file?.url;
     if (!base) return res.status(404).json({ success: false, message: "File URL not available" });
 
-    // Only proxy PDFs (raw)
-    const isRawByUrl = base.includes("/raw/upload/") || file?.resource_type === "raw";
+    // Check if it's a PDF/raw file
+    const isRawByUrl = base.includes("/raw/upload/") || file?.resource_type === "raw" || file?.format === "pdf";
     if (!isRawByUrl) {
-      // For non-PDFs, redirect to base view URL
+      // For non-PDFs (images), redirect to Cloudinary URL
       return res.redirect(base);
     }
 
-    // Stream from Cloudinary and override headers for inline viewing
+    // Stream PDF from Cloudinary and override headers for inline viewing
     const axios = (await import("axios")).default;
     const response = await axios.get(base, { responseType: "stream" });
     res.setHeader("Content-Type", "application/pdf");
@@ -379,7 +365,20 @@ export const getMyFinalContracts = async (req, res) => {
 
     const total = await FinalContract.countDocuments({ tenantId: userId });
 
-    const formattedContracts = finalContracts.map(formatFinalContract);
+    // Đếm số người ở trong mỗi phòng
+    const formattedContracts = await Promise.all(finalContracts.map(async (fc) => {
+      const formatted = formatFinalContract(fc);
+      if (fc.roomId?._id) {
+        // Đếm số FinalContract SIGNED có cùng roomId
+        const occupantCount = await FinalContract.countDocuments({
+          roomId: fc.roomId._id,
+          status: "SIGNED",
+          tenantId: { $exists: true, $ne: null }
+        });
+        formatted.occupantCount = occupantCount;
+      }
+      return formatted;
+    }));
 
     return res.status(200).json({
       success: true,

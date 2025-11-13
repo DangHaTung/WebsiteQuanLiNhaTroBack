@@ -83,4 +83,14 @@ router.put(
   asyncHandler(assignTenantToFinalContract)
 );
 
+// View file inline (proxy for PDF viewing)
+router.get(
+  "/final-contracts/:id/view/:type/:index",
+  authenticateToken,
+  asyncHandler(async (req, res) => {
+    const { viewFileInline } = await import("../controllers/finalContract.controller.js");
+    return viewFileInline(req, res);
+  })
+);
+
 export default router;

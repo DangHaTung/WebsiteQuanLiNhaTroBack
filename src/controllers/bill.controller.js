@@ -35,25 +35,54 @@ export const getMyBills = async (req, res) => {
     const skip = (page - 1) * limit;
     const userId = req.user._id;
 
-    // Tìm bills thông qua contracts của user
-    const bills = await Bill.find()
-      .populate({
-        path: "contractId",
-        match: { tenantId: userId }
-      })
+    // Tìm tất cả FinalContracts của user
+    const FinalContract = (await import("../models/finalContract.model.js")).default;
+    const finalContracts = await FinalContract.find({ tenantId: userId }).select('_id');
+    const finalContractIds = finalContracts.map(fc => fc._id);
+
+    // Tìm tất cả Contracts của user
+    const contracts = await Contract.find({ tenantId: userId }).select('_id');
+    const contractIds = contracts.map(c => c._id);
+
+    // Nếu không có contract và finalContract nào, trả về mảng rỗng
+    if (contractIds.length === 0 && finalContractIds.length === 0) {
+      return res.status(200).json({
+        message: "Lấy danh sách hóa đơn thành công",
+        success: true,
+        data: [],
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: 0,
+          totalRecords: 0,
+          limit: parseInt(limit),
+        },
+      });
+    }
+
+    // Tìm bills từ cả Contract và FinalContract
+    const filterConditions = [];
+    if (contractIds.length > 0) {
+      filterConditions.push({ contractId: { $in: contractIds } });
+    }
+    if (finalContractIds.length > 0) {
+      filterConditions.push({ finalContractId: { $in: finalContractIds } });
+    }
+
+    const filter = filterConditions.length > 1 
+      ? { $or: filterConditions }
+      : filterConditions[0];
+
+    const bills = await Bill.find(filter)
+      .populate("contractId")
+      .populate("finalContractId")
       .sort({ createdAt: -1 })
-      .limit(limit)
+      .limit(parseInt(limit))
       .skip(skip);
 
-    // Lọc ra những bills có contractId hợp lệ
-    const validBills = bills.filter(bill => bill.contractId);
-
-    const total = await Bill.countDocuments({
-      contractId: { $in: await Contract.find({ tenantId: userId }).select('_id') }
-    });
+    const total = await Bill.countDocuments(filter);
 
     // Format bills để chuyển đổi Decimal128 sang number
-    const formattedBills = validBills.map(formatBill);
+    const formattedBills = bills.map(formatBill);
 
     res.status(200).json({
       message: "Lấy danh sách hóa đơn thành công",
@@ -560,52 +589,7 @@ export const publishBatchDraftBills = async (req, res) => {
   }
 };
 
-/**
- * Lấy bill pending payment của tenant (bill chưa thanh toán)
- * GET /api/public/bills/pending-payment
- */
-export const getMyPendingPayment = async (req, res) => {
-  try {
-    const userId = req.user._id;
 
-    // Tìm hợp đồng ACTIVE của user
-    const activeContract = await Contract.findOne({
-      tenantId: userId,
-      status: "ACTIVE",
-    });
-
-    if (!activeContract) {
-      return res.status(404).json({
-        success: false,
-        message: "Bạn không có hợp đồng đang hoạt động",
-        data: [],
-      });
-    }
-
-    // Lấy tất cả bill chưa thanh toán
-    const pendingBills = await Bill.find({
-      contractId: activeContract._id,
-      status: { $in: ["UNPAID", "PARTIALLY_PAID", "PENDING_CASH_CONFIRM"] },
-    })
-      .populate("contractId")
-      .sort({ billingDate: -1 });
-
-    const formattedBills = pendingBills.map(formatBill);
-
-    return res.status(200).json({
-      success: true,
-      message: "Lấy danh sách hóa đơn chưa thanh toán thành công",
-      data: formattedBills,
-    });
-  } catch (err) {
-    console.error("getMyPendingPayment error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Lỗi khi lấy danh sách hóa đơn",
-      error: err.message,
-    });
-  }
-};
 
 // Lấy bills theo finalContractId
 export const getBillsByFinalContractId = async (req, res) => {
@@ -628,6 +612,66 @@ export const getBillsByFinalContractId = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Lỗi khi lấy bills",
+      error: err.message,
+    });
+  }
+};
+
+// Lấy danh sách hóa đơn chưa thanh toán của user
+export const getMyPendingPayment = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Tìm tất cả FinalContracts của user
+    const FinalContract = (await import("../models/finalContract.model.js")).default;
+    const finalContracts = await FinalContract.find({ tenantId: userId }).select('_id');
+    const finalContractIds = finalContracts.map(fc => fc._id);
+
+    // Tìm tất cả Contracts của user
+    const contracts = await Contract.find({ tenantId: userId }).select('_id');
+    const contractIds = contracts.map(c => c._id);
+
+    // Nếu không có contract và finalContract nào, trả về mảng rỗng
+    if (contractIds.length === 0 && finalContractIds.length === 0) {
+      return res.status(200).json({
+        message: "Lấy danh sách hóa đơn chưa thanh toán thành công",
+        success: true,
+        data: [],
+      });
+    }
+
+    // Tìm bills chưa thanh toán
+    const filterConditions = [];
+    if (contractIds.length > 0) {
+      filterConditions.push({ contractId: { $in: contractIds } });
+    }
+    if (finalContractIds.length > 0) {
+      filterConditions.push({ finalContractId: { $in: finalContractIds } });
+    }
+
+    const filter = {
+      ...(filterConditions.length > 1 
+        ? { $or: filterConditions }
+        : filterConditions[0]),
+      status: { $in: ["UNPAID", "PARTIALLY_PAID", "PENDING_CASH_CONFIRM"] }
+    };
+
+    const bills = await Bill.find(filter)
+      .populate("contractId")
+      .populate("finalContractId")
+      .sort({ createdAt: -1 });
+
+    const formattedBills = bills.map(formatBill);
+
+    res.status(200).json({
+      message: "Lấy danh sách hóa đơn chưa thanh toán thành công",
+      success: true,
+      data: formattedBills,
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Lỗi khi lấy danh sách hóa đơn chưa thanh toán",
+      success: false,
       error: err.message,
     });
   }

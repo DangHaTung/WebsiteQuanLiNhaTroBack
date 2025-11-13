@@ -61,7 +61,19 @@ export const getAllRooms = async (req, res) => {
 
         const total = await Room.countDocuments(filter);
 
-        const roomsData = rooms.map(formatRoom);
+        // Đếm số người ở cho mỗi phòng
+        const FinalContract = (await import("../models/finalContract.model.js")).default;
+        const roomsData = await Promise.all(rooms.map(async (room) => {
+            const formatted = formatRoom(room);
+            // Đếm số FinalContract SIGNED có roomId này
+            const occupantCount = await FinalContract.countDocuments({
+                roomId: room._id,
+                status: "SIGNED",
+                tenantId: { $exists: true, $ne: null }
+            });
+            formatted.occupantCount = occupantCount;
+            return formatted;
+        }));
 
         res.status(200).json({
             message: "Lấy danh sách phòng thành công",
