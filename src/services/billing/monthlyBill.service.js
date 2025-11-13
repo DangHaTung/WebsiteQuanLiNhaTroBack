@@ -244,11 +244,14 @@ export async function createMonthlyBillForRoom({
   });
 
   // Tạo hóa đơn mới
+  // Nếu electricityKwh = 0, tạo bill DRAFT (nháp), ngược lại tạo UNPAID
+  const billStatus = electricityKwh === 0 ? "DRAFT" : "UNPAID";
+  
   const bill = new Bill({
     contractId,
     billingDate: new Date(billingDate),
     billType: "MONTHLY",
-    status: "UNPAID",
+    status: billStatus,
     lineItems: feeCalculation.lineItems,
     amountDue: toDec(feeCalculation.totalAmount),
     amountPaid: toDec(0),

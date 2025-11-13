@@ -1,6 +1,8 @@
 import Util from "../models/util.model.js";
 import mongoose from "mongoose";
 
+const UTILITY_CONDITIONS = ["new", "used", "broken"];
+
 /**
  * Format utility object cho frontend
  */

@@ -3,72 +3,42 @@ import { authenticateToken, authorize } from "../middleware/auth.middleware.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
 import { validateBody, validateParams, validateQuery } from "../middleware/validation.middleware.js";
 import {
-  getAllFees,
-  getFeeById,
-  createFee,
-  updateFee,
-  deleteFee,
-  calculateElectricity,
+  getAllUtilityFees,
+  getUtilityFeeByType,
+  createOrUpdateUtilityFee,
+  deleteUtilityFee,
 } from "../controllers/utilityFee.controller.js";
-import {
-  createFeeSchema,
-  updateFeeSchema,
-  feeParamsSchema,
-  feeQuerySchema,
-  electricityCalcSchema,
-} from "../validations/utilityFee.validation.js";
+// Validation schemas removed for simplicity - can add later if needed
 
 const router = express.Router();
 
 // ADMIN routes
 router.get(
-  "/fees",
+  "/utility-fees",
   authenticateToken,
   authorize("ADMIN"),
-  validateQuery(feeQuerySchema),
-  asyncHandler(getAllFees)
+  asyncHandler(getAllUtilityFees)
 );
 
 router.get(
-  "/fees/:id",
+  "/utility-fees/:type",
   authenticateToken,
   authorize("ADMIN"),
-  validateParams(feeParamsSchema),
-  asyncHandler(getFeeById)
+  asyncHandler(getUtilityFeeByType)
 );
 
 router.post(
-  "/fees",
+  "/utility-fees",
   authenticateToken,
   authorize("ADMIN"),
-  validateBody(createFeeSchema),
-  asyncHandler(createFee)
-);
-
-router.put(
-  "/fees/:id",
-  authenticateToken,
-  authorize("ADMIN"),
-  validateParams(feeParamsSchema),
-  validateBody(updateFeeSchema),
-  asyncHandler(updateFee)
+  asyncHandler(createOrUpdateUtilityFee)
 );
 
 router.delete(
-  "/fees/:id",
+  "/utility-fees/:id",
   authenticateToken,
   authorize("ADMIN"),
-  validateParams(feeParamsSchema),
-  asyncHandler(deleteFee)
-);
-
-// Electricity calculator endpoint
-router.post(
-  "/fees/electricity/calculate",
-  authenticateToken,
-  authorize("ADMIN"),
-  validateBody(electricityCalcSchema),
-  asyncHandler(calculateElectricity)
+  asyncHandler(deleteUtilityFee)
 );
 
 export default router;

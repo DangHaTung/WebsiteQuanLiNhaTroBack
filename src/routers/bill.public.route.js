@@ -13,5 +13,11 @@ router.get("/bills/my-bills", authenticateToken, validatePagination(), asyncHand
 // Route cho client xem bill theo ID (cần auth nhưng không cần admin)
 router.get("/bills/public/:id", authenticateToken, validateParams(billParamsSchema), asyncHandler(getBillById));
 
+// Route: Lấy danh sách bill chưa thanh toán
+router.get("/bills/pending-payment", authenticateToken, asyncHandler(async (req, res) => {
+  const { getMyPendingPayment } = await import("../controllers/bill.controller.js");
+  return getMyPendingPayment(req, res);
+}));
+
 export default router;
 
