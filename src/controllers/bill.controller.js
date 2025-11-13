@@ -78,16 +78,25 @@ export const getMyBills = async (req, res) => {
 // Lấy danh sách hóa đơn (admin)
 export const getAllBills = async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 10, status, billType } = req.query;
     const skip = (page - 1) * limit;
 
-    const bills = await Bill.find()
+    // Build filter query
+    const filter = {};
+    if (status && status !== "ALL") {
+      filter.status = status;
+    }
+    if (billType && billType !== "ALL") {
+      filter.billType = billType;
+    }
+
+    const bills = await Bill.find(filter)
       .populate("contractId")
       .sort({ createdAt: -1 })
       .limit(limit)
       .skip(skip);
 
-    const total = await Bill.countDocuments();
+    const total = await Bill.countDocuments(filter);
 
     // Format bills để chuyển đổi Decimal128 sang number
     const formattedBills = bills.map(formatBill);
@@ -335,3 +344,223 @@ export const cancelBill = async (req, res) => {
 };
 
 // (ĐÃ BỎ) Delete bill: không dùng trong nghiệp vụ — route đã gỡ bỏ
+
+/**
+ * Lấy tất cả bills DRAFT (nháp) - Admin only
+ * GET /api/bills/drafts
+ */
+export const getDraftBills = async (req, res) => {
+  try {
+    const { page = 1, limit = 50 } = req.query;
+    const skip = (page - 1) * limit;
+
+    const bills = await Bill.find({ status: "DRAFT", billType: "MONTHLY" })
+      .populate("contractId")
+      .sort({ billingDate: -1 })
+      .limit(limit)
+      .skip(skip);
+
+    const total = await Bill.countDocuments({ status: "DRAFT", billType: "MONTHLY" });
+
+    const formattedBills = bills.map(formatBill);
+
+    res.status(200).json({
+      message: "Lấy danh sách hóa đơn nháp thành công",
+      success: true,
+      data: formattedBills,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalRecords: total,
+        limit: parseInt(limit),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Lỗi khi lấy danh sách hóa đơn nháp",
+      success: false,
+      error: err.message,
+    });
+  }
+};
+
+/**
+ * Cập nhật số điện và phát hành bill (DRAFT → UNPAID)
+ * PUT /api/bills/:id/publish
+ */
+export const publishDraftBill = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { electricityKwh, waterM3 = 0, occupantCount = 1 } = req.body;
+
+    const bill = await Bill.findById(id).populate("contractId");
+    if (!bill) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
+    }
+
+    if (bill.status !== "DRAFT") {
+      return res.status(400).json({ success: false, message: "Chỉ có thể phát hành hóa đơn nháp" });
+    }
+
+    if (!bill.contractId) {
+      return res.status(400).json({ success: false, message: "Hóa đơn không có hợp đồng liên kết" });
+    }
+
+    // Lấy thông tin contract và room
+    const contract = await Contract.findById(bill.contractId._id).populate("roomId");
+    if (!contract || !contract.roomId) {
+      return res.status(400).json({ success: false, message: "Không tìm thấy thông tin phòng" });
+    }
+
+    // Tính toán lại với số điện mới
+    const { calculateRoomMonthlyFees } = await import("../services/billing/monthlyBill.service.js");
+    const feeCalculation = await calculateRoomMonthlyFees({
+      roomId: contract.roomId._id,
+      electricityKwh: Number(electricityKwh),
+      waterM3: Number(waterM3),
+      occupantCount: Number(occupantCount),
+    });
+
+    // Cập nhật bill
+    bill.status = "UNPAID";
+    bill.lineItems = feeCalculation.lineItems;
+    bill.amountDue = mongoose.Types.Decimal128.fromString(String(feeCalculation.totalAmount));
+    bill.updatedAt = new Date();
+
+    await bill.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Phát hành hóa đơn thành công",
+      data: formatBill(bill),
+    });
+  } catch (err) {
+    console.error("publishDraftBill error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi phát hành hóa đơn",
+      error: err.message,
+    });
+  }
+};
+
+/**
+ * Phát hành nhiều bills cùng lúc
+ * POST /api/bills/publish-batch
+ */
+export const publishBatchDraftBills = async (req, res) => {
+  try {
+    const { bills } = req.body; // Array of { billId, electricityKwh, occupantCount }
+
+    if (!Array.isArray(bills) || bills.length === 0) {
+      return res.status(400).json({ success: false, message: "Danh sách bills không hợp lệ" });
+    }
+
+    const results = {
+      success: [],
+      failed: [],
+    };
+
+    for (const item of bills) {
+      try {
+        const { billId, electricityKwh, waterM3 = 0, occupantCount = 1 } = item;
+
+        const bill = await Bill.findById(billId).populate("contractId");
+        if (!bill || bill.status !== "DRAFT") {
+          results.failed.push({ billId, error: "Bill không hợp lệ hoặc không phải DRAFT" });
+          continue;
+        }
+
+        const contract = await Contract.findById(bill.contractId._id).populate("roomId");
+        if (!contract || !contract.roomId) {
+          results.failed.push({ billId, error: "Không tìm thấy thông tin phòng" });
+          continue;
+        }
+
+        // Tính toán lại
+        const { calculateRoomMonthlyFees } = await import("../services/billing/monthlyBill.service.js");
+        const feeCalculation = await calculateRoomMonthlyFees({
+          roomId: contract.roomId._id,
+          electricityKwh: Number(electricityKwh),
+          waterM3: Number(waterM3),
+          occupantCount: Number(occupantCount),
+        });
+
+        // Cập nhật
+        bill.status = "UNPAID";
+        bill.lineItems = feeCalculation.lineItems;
+        bill.amountDue = mongoose.Types.Decimal128.fromString(String(feeCalculation.totalAmount));
+        bill.updatedAt = new Date();
+        await bill.save();
+
+        results.success.push({
+          billId: bill._id,
+          roomNumber: contract.roomId.roomNumber,
+          totalAmount: feeCalculation.totalAmount,
+        });
+      } catch (error) {
+        results.failed.push({ billId: item.billId, error: error.message });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Phát hành ${results.success.length} hóa đơn thành công`,
+      data: results,
+    });
+  } catch (err) {
+    console.error("publishBatchDraftBills error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi phát hành hóa đơn hàng loạt",
+      error: err.message,
+    });
+  }
+};
+
+/**
+ * Lấy bill pending payment của tenant (bill chưa thanh toán)
+ * GET /api/public/bills/pending-payment
+ */
+export const getMyPendingPayment = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Tìm hợp đồng ACTIVE của user
+    const activeContract = await Contract.findOne({
+      tenantId: userId,
+      status: "ACTIVE",
+    });
+
+    if (!activeContract) {
+      return res.status(404).json({
+        success: false,
+        message: "Bạn không có hợp đồng đang hoạt động",
+        data: [],
+      });
+    }
+
+    // Lấy tất cả bill chưa thanh toán
+    const pendingBills = await Bill.find({
+      contractId: activeContract._id,
+      status: { $in: ["UNPAID", "PARTIALLY_PAID", "PENDING_CASH_CONFIRM"] },
+    })
+      .populate("contractId")
+      .sort({ billingDate: -1 });
+
+    const formattedBills = pendingBills.map(formatBill);
+
+    return res.status(200).json({
+      success: true,
+      message: "Lấy danh sách hóa đơn chưa thanh toán thành công",
+      data: formattedBills,
+    });
+  } catch (err) {
+    console.error("getMyPendingPayment error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi lấy danh sách hóa đơn",
+      error: err.message,
+    });
+  }
+};

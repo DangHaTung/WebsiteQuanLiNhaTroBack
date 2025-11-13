@@ -1,138 +1,156 @@
-import mongoose from "mongoose";
-import UtilityFee, { FEE_TYPES } from "../models/utilityFee.model.js";
-import { calculateElectricityCost, DEFAULT_ELECTRICITY_TIERS } from "../services/utility/electricity.service.js";
+// Controller quản lý phí tiện ích
+import UtilityFee from "../models/utilityFee.model.js";
 
-const formatFee = (fee) => {
-  const obj = fee.toObject();
-  return {
-    _id: obj._id,
-    type: obj.type,
-    description: obj.description,
-    baseRate: obj.baseRate,
-    electricityTiers: obj.electricityTiers,
-    vatPercent: obj.vatPercent,
-    isActive: obj.isActive,
-    createdAt: obj.createdAt,
-    updatedAt: obj.updatedAt,
-  };
-};
-
-export const getAllFees = async (req, res) => {
+/**
+ * Lấy tất cả utility fees
+ * GET /api/utility-fees
+ */
+export const getAllUtilityFees = async (req, res) => {
   try {
-    const { type, isActive, page = 1, limit = 10 } = req.query;
-    const skip = (page - 1) * limit;
-    const filter = {};
-    if (type) filter.type = type;
-    if (typeof isActive !== "undefined") filter.isActive = isActive === "true";
-
-    const fees = await UtilityFee.find(filter)
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .skip(skip);
-
-    const total = await UtilityFee.countDocuments(filter);
+    const fees = await UtilityFee.find().sort({ type: 1 });
+    
     res.status(200).json({
-      message: "Lấy danh sách phí tiện ích thành công",
       success: true,
-      data: fees.map(formatFee),
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(total / limit),
-        totalRecords: total,
-        limit: parseInt(limit),
-      },
+      message: "Lấy danh sách phí tiện ích thành công",
+      data: fees,
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Lỗi khi lấy danh sách phí", error: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Lỗi khi lấy danh sách phí tiện ích",
+      error: err.message,
+    });
   }
 };
 
-export const getFeeById = async (req, res) => {
+/**
+ * Lấy utility fee theo type
+ * GET /api/utility-fees/:type
+ */
+export const getUtilityFeeByType = async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ success: false, message: "ID không hợp lệ" });
-    const fee = await UtilityFee.findById(id);
-    if (!fee) return res.status(404).json({ success: false, message: "Không tìm thấy phí" });
-    res.status(200).json({ success: true, message: "Lấy phí thành công", data: formatFee(fee) });
+    const { type } = req.params;
+    
+    const fee = await UtilityFee.findOne({ type, isActive: true });
+    
+    if (!fee) {
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy cấu hình phí cho ${type}`,
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Lấy thông tin phí tiện ích thành công",
+      data: fee,
+    });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Lỗi khi lấy phí", error: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Lỗi khi lấy thông tin phí tiện ích",
+      error: err.message,
+    });
   }
 };
 
-export const createFee = async (req, res) => {
+/**
+ * Tạo hoặc cập nhật utility fee
+ * POST /api/utility-fees
+ */
+export const createOrUpdateUtilityFee = async (req, res) => {
   try {
     const { type, description, baseRate, electricityTiers, vatPercent, isActive } = req.body;
-
-    // If creating active fee, deactivate previous active of same type
-    if (isActive) {
-      await UtilityFee.updateMany({ type, isActive: true }, { $set: { isActive: false } });
+    
+    if (!type) {
+      return res.status(400).json({
+        success: false,
+        message: "Type là bắt buộc",
+      });
     }
-
-    const fee = new UtilityFee({ type, description, baseRate, electricityTiers, vatPercent, isActive });
-    const saved = await fee.save();
-    res.status(201).json({ success: true, message: "Tạo phí tiện ích thành công", data: formatFee(saved) });
+    
+    // Tìm fee hiện tại
+    let fee = await UtilityFee.findOne({ type, isActive: true });
+    
+    if (fee) {
+      // Cập nhật
+      fee.description = description || fee.description;
+      fee.baseRate = baseRate !== undefined ? baseRate : fee.baseRate;
+      fee.electricityTiers = electricityTiers || fee.electricityTiers;
+      fee.vatPercent = vatPercent !== undefined ? vatPercent : fee.vatPercent;
+      fee.isActive = isActive !== undefined ? isActive : fee.isActive;
+      
+      await fee.save();
+      
+      return res.status(200).json({
+        success: true,
+        message: "Cập nhật phí tiện ích thành công",
+        data: fee,
+      });
+    } else {
+      // Tạo mới
+      fee = new UtilityFee({
+        type,
+        description,
+        baseRate: baseRate || 0,
+        electricityTiers: electricityTiers || [],
+        vatPercent: vatPercent !== undefined ? vatPercent : 8,
+        isActive: isActive !== undefined ? isActive : true,
+      });
+      
+      await fee.save();
+      
+      return res.status(201).json({
+        success: true,
+        message: "Tạo phí tiện ích thành công",
+        data: fee,
+      });
+    }
   } catch (err) {
-    res.status(500).json({ success: false, message: "Lỗi khi tạo phí", error: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Lỗi khi tạo/cập nhật phí tiện ích",
+      error: err.message,
+    });
   }
 };
 
-export const updateFee = async (req, res) => {
+/**
+ * Xóa utility fee (soft delete)
+ * DELETE /api/utility-fees/:id
+ */
+export const deleteUtilityFee = async (req, res) => {
   try {
     const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ success: false, message: "ID không hợp lệ" });
-
-    const updateData = { ...req.body };
-    if (updateData.isActive === true) {
-      const current = await UtilityFee.findById(id);
-      if (current) {
-        await UtilityFee.updateMany({ type: current.type, isActive: true }, { $set: { isActive: false } });
-      }
+    
+    const fee = await UtilityFee.findById(id);
+    
+    if (!fee) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy phí tiện ích",
+      });
     }
-
-    const fee = await UtilityFee.findByIdAndUpdate(id, updateData, { new: true, runValidators: true });
-    if (!fee) return res.status(404).json({ success: false, message: "Không tìm thấy phí" });
-    res.status(200).json({ success: true, message: "Cập nhật phí thành công", data: formatFee(fee) });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Lỗi khi cập nhật phí", error: err.message });
-  }
-};
-
-export const deleteFee = async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ success: false, message: "ID không hợp lệ" });
-    const fee = await UtilityFee.findByIdAndUpdate(id, { isActive: false }, { new: true });
-    if (!fee) return res.status(404).json({ success: false, message: "Không tìm thấy phí" });
-    res.status(200).json({ success: true, message: "Xoá phí thành công" });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Lỗi khi xoá phí", error: err.message });
-  }
-};
-
-// Calculate electricity fee independent from room utilities
-export const calculateElectricity = async (req, res) => {
-  try {
-    const { kwh } = req.body;
-    if (typeof kwh !== "number" || kwh < 0) {
-      return res.status(400).json({ success: false, message: "kWh phải là số không âm" });
-    }
-
-    // Use active config if exists, otherwise default tiers and 8% VAT
-    const active = await UtilityFee.findOne({ type: "electricity", isActive: true });
-    const tiers = active?.electricityTiers?.length ? active.electricityTiers : DEFAULT_ELECTRICITY_TIERS;
-    const vatPercent = typeof active?.vatPercent === "number" ? active.vatPercent : 8;
-    const result = calculateElectricityCost(kwh, tiers, vatPercent);
-
+    
+    fee.isActive = false;
+    await fee.save();
+    
     res.status(200).json({
       success: true,
-      message: "Tính tiền điện thành công",
-      data: {
-        input: { kwh },
-        tiers,
-        result,
-      },
+      message: "Xóa phí tiện ích thành công",
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Lỗi khi tính tiền điện", error: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Lỗi khi xóa phí tiện ích",
+      error: err.message,
+    });
   }
+};
+
+export default {
+  getAllUtilityFees,
+  getUtilityFeeByType,
+  createOrUpdateUtilityFee,
+  deleteUtilityFee,
 };

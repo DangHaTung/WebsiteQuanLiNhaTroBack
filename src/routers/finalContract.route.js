@@ -1,19 +1,29 @@
 import express from "express";
 import {
+  getAllFinalContracts,
   uploadFiles,
   uploadCCCDFile,
   getRemainingAmount,
   deleteFinalContractById,
   assignTenantToFinalContract,
+  deleteFileFromFinalContract,
 } from "../controllers/finalContract.controller.js";
 import { finalContractParamsSchema, deleteFileParamsSchema, assignTenantSchema } from "../validations/finalContract.validation.js";
-import { validateParams, validateBody } from "../middleware/validation.middleware.js";
+import { validateParams, validateBody, validatePagination } from "../middleware/validation.middleware.js";
 import { authenticateToken, authorize } from "../middleware/auth.middleware.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
 import { uploadFinalContractFiles, uploadCCCDFiles } from "../middleware/upload.middleware.js";
-import { deleteFileFromFinalContract } from "../controllers/finalContract.controller.js";
 
 const router = express.Router();
+
+// Get all final contracts (Admin only)
+router.get(
+  "/final-contracts",
+  authenticateToken,
+  authorize('ADMIN'),
+  validatePagination(),
+  asyncHandler(getAllFinalContracts)
+);
 
 // Upload signed contract files (images/PDF)
 router.post(
@@ -74,12 +84,3 @@ router.put(
 );
 
 export default router;
-// Assign tenant to final contract
-router.put(
-  "/final-contracts/:id/assign-tenant",
-  authenticateToken,
-  authorize('ADMIN'),
-  validateParams(finalContractParamsSchema),
-  validateBody(assignTenantSchema),
-  asyncHandler(assignTenantToFinalContract)
-);

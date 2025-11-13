@@ -322,6 +322,83 @@ export const approveOwnerSigned = async (req, res) => {
   }
 };
 
+// Get all final contracts (Admin only) with pagination
+export const getAllFinalContracts = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status, tenantId, roomId } = req.query;
+    const skip = (page - 1) * limit;
+
+    // Build filter
+    const filter = {};
+    if (status) filter.status = status;
+    if (tenantId) filter.tenantId = tenantId;
+    if (roomId) filter.roomId = roomId;
+
+    const finalContracts = await FinalContract.find(filter)
+      .populate("tenantId", "fullName email phone role")
+      .populate("roomId", "roomNumber pricePerMonth type")
+      .populate("originContractId")
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    const total = await FinalContract.countDocuments(filter);
+
+    const formattedContracts = finalContracts.map(formatFinalContract);
+
+    return res.status(200).json({
+      success: true,
+      message: "Lấy danh sách hợp đồng chính thức thành công",
+      data: formattedContracts,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalRecords: total,
+        limit: parseInt(limit),
+      },
+    });
+  } catch (err) {
+    console.error("getAllFinalContracts error:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+// Get my final contracts (Tenant)
+export const getMyFinalContracts = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (page - 1) * limit;
+    const userId = req.user._id;
+
+    const finalContracts = await FinalContract.find({ tenantId: userId })
+      .populate("tenantId", "fullName email phone")
+      .populate("roomId", "roomNumber pricePerMonth")
+      .populate("originContractId")
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    const total = await FinalContract.countDocuments({ tenantId: userId });
+
+    const formattedContracts = finalContracts.map(formatFinalContract);
+
+    return res.status(200).json({
+      success: true,
+      message: "Lấy danh sách hợp đồng chính thức của tôi thành công",
+      data: formattedContracts,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalRecords: total,
+        limit: parseInt(limit),
+      },
+    });
+  } catch (err) {
+    console.error("getMyFinalContracts error:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
 export const getRemainingAmount = async (req, res) => {
   try {
     const { id } = req.params;
@@ -487,6 +564,8 @@ export const deleteFileFromFinalContract = async (req, res) => {
 export default {
   createFromContract,
   getFinalContractById,
+  getAllFinalContracts,
+  getMyFinalContracts,
   uploadFiles,
   uploadCCCDFile,
   approveOwnerSigned,
@@ -494,4 +573,5 @@ export default {
   getRemainingAmount,
   deleteFinalContractById,
   deleteFileFromFinalContract,
+  assignTenantToFinalContract,
 };

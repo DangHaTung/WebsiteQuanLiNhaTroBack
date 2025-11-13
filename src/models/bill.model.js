@@ -16,7 +16,7 @@ const billSchema = new Schema(
 
     status: {
       type: String,
-      enum: ["UNPAID", "PARTIALLY_PAID", "PAID", "VOID", "PENDING_CASH_CONFIRM"],
+      enum: ["DRAFT", "UNPAID", "PARTIALLY_PAID", "PAID", "VOID", "PENDING_CASH_CONFIRM"],
       default: "UNPAID",
     },
 
