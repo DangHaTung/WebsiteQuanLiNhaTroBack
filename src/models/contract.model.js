@@ -58,6 +58,19 @@ const contractSchema = new Schema(
       transactionId: { type: String },
       note: { type: String },
     },
+    // Người ở cùng (co-tenants) - cho phép nhiều người ở chung phòng
+    coTenants: [
+      {
+        userId: { type: Schema.Types.ObjectId, ref: "User" },
+        fullName: { type: String },
+        phone: { type: String },
+        email: { type: String },
+        identityNo: { type: String },
+        joinedAt: { type: Date, default: Date.now },
+        leftAt: { type: Date }, // Nếu rời phòng giữa chừng
+        finalContractId: { type: Schema.Types.ObjectId, ref: "FinalContract" },
+      },
+    ],
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

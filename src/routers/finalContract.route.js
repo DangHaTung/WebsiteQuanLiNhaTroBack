@@ -7,6 +7,7 @@ import {
   deleteFinalContractById,
   assignTenantToFinalContract,
   deleteFileFromFinalContract,
+  createForCoTenant,
 } from "../controllers/finalContract.controller.js";
 import { finalContractParamsSchema, deleteFileParamsSchema, assignTenantSchema } from "../validations/finalContract.validation.js";
 import { validateParams, validateBody, validatePagination } from "../middleware/validation.middleware.js";
@@ -91,6 +92,14 @@ router.get(
     const { viewFileInline } = await import("../controllers/finalContract.controller.js");
     return viewFileInline(req, res);
   })
+);
+
+// Create FinalContract for co-tenant (Admin only)
+router.post(
+  "/final-contracts/create-for-cotenant",
+  authenticateToken,
+  authorize('ADMIN'),
+  asyncHandler(createForCoTenant)
 );
 
 export default router;

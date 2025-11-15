@@ -61,17 +61,25 @@ export const getAllRooms = async (req, res) => {
 
         const total = await Room.countDocuments(filter);
 
-        // Đếm số người ở cho mỗi phòng
-        const FinalContract = (await import("../models/finalContract.model.js")).default;
+        // Đếm số người ở cho mỗi phòng (từ Contract)
+        const Contract = (await import("../models/contract.model.js")).default;
         const roomsData = await Promise.all(rooms.map(async (room) => {
             const formatted = formatRoom(room);
-            // Đếm số FinalContract SIGNED có roomId này
-            const occupantCount = await FinalContract.countDocuments({
+            
+            // Tìm contract ACTIVE của phòng này
+            const activeContract = await Contract.findOne({
                 roomId: room._id,
-                status: "SIGNED",
-                tenantId: { $exists: true, $ne: null }
+                status: "ACTIVE"
             });
-            formatted.occupantCount = occupantCount;
+            
+            if (activeContract) {
+                // Đếm: 1 người thuê chính + số người ở cùng (chưa rời đi)
+                const coTenantsCount = activeContract.coTenants?.filter(ct => !ct.leftAt).length || 0;
+                formatted.occupantCount = 1 + coTenantsCount; // 1 = người thuê chính
+            } else {
+                formatted.occupantCount = 0;
+            }
+            
             return formatted;
         }));
 
@@ -227,6 +235,7 @@ export const updateRoom = async (req, res) => {
         const update = { ...req.body };
         delete update._id;
 
+        // Xử lý ảnh upload mới
         let uploadedImages = [];
         if (Array.isArray(req.files)) {
             uploadedImages = req.files.map((f) => ({ url: f.path, publicId: f.filename }));
@@ -238,30 +247,45 @@ export const updateRoom = async (req, res) => {
             uploadedImages = list.map((f) => ({ url: f.path, publicId: f.filename }));
         }
 
-        let bodyImagesUpdate = [];
-        if (Array.isArray(req.body?.images) || typeof req.body?.images === "string") {
+        // Parse danh sách ảnh cũ từ body.existingImages (ảnh cũ giữ lại)
+        let existingImages = [];
+        if (req.body?.existingImages) {
             try {
-                if (typeof req.body.images === "string") {
-                    const parsed = JSON.parse(req.body.images);
-                    if (Array.isArray(parsed)) req.body.images = parsed;
+                const parsed = typeof req.body.existingImages === "string" 
+                    ? JSON.parse(req.body.existingImages) 
+                    : req.body.existingImages;
+                
+                if (Array.isArray(parsed)) {
+                    existingImages = parsed
+                        .map((it) => (typeof it === "string" ? { url: it } : it))
+                        .filter((it) => it && it.url);
                 }
-            } catch {}
-            bodyImagesUpdate = (Array.isArray(req.body.images) ? req.body.images : [])
-                .map((it) => (typeof it === "string" ? { url: it } : it))
-                .filter((it) => it && it.url);
+            } catch (e) {
+                console.warn("Failed to parse existingImages:", e);
+            }
         }
 
-        if (uploadedImages.length > 0) {
+        // Logic xử lý ảnh:
+        // - Nếu có existingImages → REPLACE với danh sách này + ảnh mới upload
+        // - Nếu không có existingImages nhưng có upload mới → CHỈ thêm ảnh mới (merge)
+        if (req.body?.existingImages !== undefined) {
+            // User đã gửi danh sách ảnh cũ (có thể rỗng nếu xóa hết) → REPLACE
+            update.images = [...existingImages, ...uploadedImages];
+            
+            // Cập nhật coverImageUrl
+            if (update.images.length > 0) {
+                update.coverImageUrl = update.images[0].url;
+            } else {
+                update.coverImageUrl = null; // Xóa hết ảnh
+            }
+        } else if (uploadedImages.length > 0) {
+            // Không có existingImages nhưng có upload mới → MERGE (giữ ảnh cũ + thêm mới)
             const existing = await Room.findById(id).select("images coverImageUrl");
             const mergedImages = [...(existing?.images || []), ...uploadedImages];
             update.images = mergedImages;
-            if (!existing?.coverImageUrl) update.coverImageUrl = uploadedImages[0].url;
-        }
-        if (bodyImagesUpdate.length > 0) {
-            const existing = await Room.findById(id).select("images coverImageUrl");
-            const mergedImages = [...(existing?.images || []), ...bodyImagesUpdate];
-            update.images = mergedImages;
-            if (!existing?.coverImageUrl) update.coverImageUrl = bodyImagesUpdate[0].url;
+            if (!existing?.coverImageUrl && mergedImages.length > 0) {
+                update.coverImageUrl = mergedImages[0].url;
+            }
         }
 
         const updated = await Room.findByIdAndUpdate(id, update, { new: true });

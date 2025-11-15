@@ -215,24 +215,29 @@ export async function createMonthlyBillForRoom({
     throw new Error(`Không tìm thấy thông tin phòng cho hợp đồng ${contractId}`);
   }
 
-  // Kiểm tra xem đã có hóa đơn cho tháng này chưa
+  // Kiểm tra xem đã có hóa đơn cho tháng này chưa (CHỈ KIỂM TRA KHI KHÔNG PHẢI TEST MODE)
+  // Cho phép tạo nhiều bill trong cùng tháng để test
   const billingMonth = new Date(billingDate);
-  const startOfMonth = new Date(billingMonth.getFullYear(), billingMonth.getMonth(), 1);
-  const endOfMonth = new Date(billingMonth.getFullYear(), billingMonth.getMonth() + 1, 0, 23, 59, 59);
+  const isTestMode = process.env.NODE_ENV !== "production";
+  
+  if (!isTestMode) {
+    const startOfMonth = new Date(billingMonth.getFullYear(), billingMonth.getMonth(), 1);
+    const endOfMonth = new Date(billingMonth.getFullYear(), billingMonth.getMonth() + 1, 0, 23, 59, 59);
 
-  const existingBill = await Bill.findOne({
-    contractId,
-    billType: "MONTHLY",
-    billingDate: {
-      $gte: startOfMonth,
-      $lte: endOfMonth,
-    },
-  });
+    const existingBill = await Bill.findOne({
+      contractId,
+      billType: "MONTHLY",
+      billingDate: {
+        $gte: startOfMonth,
+        $lte: endOfMonth,
+      },
+    });
 
-  if (existingBill) {
-    throw new Error(
-      `Đã tồn tại hóa đơn tháng ${billingMonth.getMonth() + 1}/${billingMonth.getFullYear()} cho phòng ${room.roomNumber}`
-    );
+    if (existingBill) {
+      throw new Error(
+        `Đã tồn tại hóa đơn tháng ${billingMonth.getMonth() + 1}/${billingMonth.getFullYear()} cho phòng ${room.roomNumber}`
+      );
+    }
   }
 
   // Tính toán các khoản phí
@@ -288,6 +293,7 @@ export async function createMonthlyBillsForAllRooms({
   billingDate = new Date(),
   roomUsageData = {},
 }) {
+  const FinalContract = (await import("../../models/finalContract.model.js")).default;
   const results = {
     success: [],
     failed: [],
@@ -315,6 +321,42 @@ export async function createMonthlyBillsForAllRooms({
           error: "Không tìm thấy thông tin phòng",
         });
         results.summary.errors++;
+        continue;
+      }
+
+      // ✅ VALIDATION: Chỉ tạo bill MONTHLY nếu:
+      // 1. Có FinalContract SIGNED
+      // 2. Bill CONTRACT đã PAID
+      
+      // Kiểm tra FinalContract
+      const finalContract = await FinalContract.findOne({ 
+        originContractId: contract._id,
+        status: "SIGNED"
+      });
+      
+      if (!finalContract) {
+        results.failed.push({
+          contractId: contract._id,
+          roomNumber: room.roomNumber,
+          error: "Chưa có hợp đồng chính thức (FinalContract) hoặc chưa ký",
+        });
+        results.summary.skipped++;
+        continue;
+      }
+
+      // Kiểm tra Bill CONTRACT đã thanh toán chưa
+      const contractBill = await Bill.findOne({
+        contractId: contract._id,
+        billType: "CONTRACT",
+      });
+      
+      if (!contractBill || contractBill.status !== "PAID") {
+        results.failed.push({
+          contractId: contract._id,
+          roomNumber: room.roomNumber,
+          error: "Bill CONTRACT (tháng đầu) chưa thanh toán",
+        });
+        results.summary.skipped++;
         continue;
       }
 

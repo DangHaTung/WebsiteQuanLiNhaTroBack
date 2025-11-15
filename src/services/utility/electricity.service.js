@@ -28,7 +28,12 @@ export function calculateElectricityCost(kwh, tiers = DEFAULT_ELECTRICITY_TIERS,
 
   tiers.forEach((t, idx) => {
     if (remaining <= 0) return;
-    const cap = t.max != null ? t.max - t.min + 1 : Infinity; // inclusive bounds
+    // Tính số kWh tối đa trong bậc này
+    // Bậc 1 (0-50): max = 50, vì đếm từ kWh thứ 1
+    // Bậc 2 (51-100): max - min + 1 = 100 - 51 + 1 = 50
+    const cap = t.max != null 
+      ? (t.min === 0 ? t.max : t.max - t.min + 1)
+      : Infinity;
     const used = Math.min(remaining, cap);
     const amount = used * t.rate;
     items.push({

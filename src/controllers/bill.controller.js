@@ -17,16 +17,41 @@ const formatBill = (bill) => ({
     ...bill.toObject(),
     amountDue: convertDecimal128(bill.amountDue),
     amountPaid: convertDecimal128(bill.amountPaid),
-    lineItems: bill.lineItems?.map(item => ({
-        ...item,
-        unitPrice: convertDecimal128(item.unitPrice),
-        lineTotal: convertDecimal128(item.lineTotal),
-    })) || [],
+    lineItems: bill.lineItems?.map(item => {
+        const plainItem = item.toObject ? item.toObject() : item;
+        return {
+            ...plainItem,
+            unitPrice: convertDecimal128(plainItem.unitPrice),
+            lineTotal: convertDecimal128(plainItem.lineTotal),
+        };
+    }) || [],
     payments: bill.payments?.map(payment => ({
         ...payment,
         amount: convertDecimal128(payment.amount),
     })) || [],
 });
+
+/**
+ * Helper: Lấy tất cả contractIds và finalContractIds của user (bao gồm co-tenant)
+ */
+const getUserContractIds = async (userId) => {
+    const FinalContract = (await import("../models/finalContract.model.js")).default;
+    
+    // Tìm FinalContracts
+    const finalContracts = await FinalContract.find({ tenantId: userId }).select('_id');
+    const finalContractIds = finalContracts.map(fc => fc._id);
+    
+    // Tìm Contracts (bao gồm cả co-tenant)
+    const contracts = await Contract.find({
+        $or: [
+            { tenantId: userId }, // User là người chính
+            { "coTenants.userId": userId } // User là người ở cùng
+        ]
+    }).select('_id');
+    const contractIds = contracts.map(c => c._id);
+    
+    return { contractIds, finalContractIds };
+};
 
 // Lấy danh sách hóa đơn của user hiện tại
 export const getMyBills = async (req, res) => {
@@ -35,14 +60,8 @@ export const getMyBills = async (req, res) => {
     const skip = (page - 1) * limit;
     const userId = req.user._id;
 
-    // Tìm tất cả FinalContracts của user
-    const FinalContract = (await import("../models/finalContract.model.js")).default;
-    const finalContracts = await FinalContract.find({ tenantId: userId }).select('_id');
-    const finalContractIds = finalContracts.map(fc => fc._id);
-
-    // Tìm tất cả Contracts của user
-    const contracts = await Contract.find({ tenantId: userId }).select('_id');
-    const contractIds = contracts.map(c => c._id);
+    // Lấy tất cả contractIds và finalContractIds (bao gồm co-tenant)
+    const { contractIds, finalContractIds } = await getUserContractIds(userId);
 
     // Nếu không có contract và finalContract nào, trả về mảng rỗng
     if (contractIds.length === 0 && finalContractIds.length === 0) {
@@ -68,9 +87,12 @@ export const getMyBills = async (req, res) => {
       filterConditions.push({ finalContractId: { $in: finalContractIds } });
     }
 
-    const filter = filterConditions.length > 1 
+    let filter = filterConditions.length > 1 
       ? { $or: filterConditions }
       : filterConditions[0];
+    
+    // Chỉ hiển thị bills đã publish (không phải DRAFT)
+    filter = { ...filter, status: { $ne: "DRAFT" } };
 
     const bills = await Bill.find(filter)
       .populate("contractId")
@@ -296,7 +318,7 @@ export const updateBill = async (req, res) => {
   }
 };
 
-// Xác nhận tiền mặt cho phiếu thu (RECEIPT) ở trạng thái PENDING_CASH_CONFIRM
+// Xác nhận tiền mặt cho bill (RECEIPT hoặc CONTRACT)
 export const confirmCashReceipt = async (req, res) => {
   try {
     const isAdmin = req.user?.role === "ADMIN";
@@ -307,11 +329,9 @@ export const confirmCashReceipt = async (req, res) => {
     const bill = await Bill.findById(req.params.id).populate("contractId");
     if (!bill) return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
 
-    if (bill.billType !== "RECEIPT") {
-      return res.status(400).json({ success: false, message: "Chỉ xác nhận tiền mặt cho bill phiếu thu (RECEIPT)" });
-    }
-    if (bill.status !== "PENDING_CASH_CONFIRM") {
-      return res.status(400).json({ success: false, message: "Bill không ở trạng thái chờ xác nhận tiền mặt" });
+    // Chỉ xử lý bill chưa thanh toán hoặc đang chờ xác nhận
+    if (!["UNPAID", "PENDING_CASH_CONFIRM", "PARTIALLY_PAID"].includes(bill.status)) {
+      return res.status(400).json({ success: false, message: "Bill đã thanh toán hoặc không hợp lệ" });
     }
 
     const due = convertDecimal128(bill.amountDue) || 0;
@@ -336,53 +356,16 @@ export const confirmCashReceipt = async (req, res) => {
 
     await bill.save();
 
+    // KHÔNG tự động complete checkin cho tiền mặt - cần admin click "Hoàn thành" riêng
+    console.log(`✅ [CASH CONFIRM] Bill ${bill._id} confirmed as PAID - Checkin requires manual completion`);
+
     return res.status(200).json({ success: true, message: "Xác nhận tiền mặt thành công", data: formatBill(bill) });
   } catch (err) {
     return res.status(500).json({ success: false, message: "Lỗi xác nhận tiền mặt", error: err.message });
   }
 };
 
-// Xác nhận thanh toán tiền mặt cho bất kỳ bill nào (RECEIPT, CONTRACT, MONTHLY)
-export const confirmCashPayment = async (req, res) => {
-  try {
-    const isAdmin = req.user?.role === "ADMIN";
-    if (!isAdmin) {
-      return res.status(403).json({ success: false, message: "Forbidden" });
-    }
 
-    const bill = await Bill.findById(req.params.id).populate("contractId");
-    if (!bill) return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
-
-    if (bill.status === "PAID") {
-      return res.status(400).json({ success: false, message: "Hóa đơn đã được thanh toán" });
-    }
-
-    const due = convertDecimal128(bill.amountDue) || 0;
-    const paid = convertDecimal128(bill.amountPaid) || 0;
-    const transfer = Math.max(due - paid, 0);
-
-    // Cập nhật trạng thái và tiền
-    bill.status = "PAID";
-    bill.amountPaid = mongoose.Types.Decimal128.fromString(String(paid + transfer));
-    bill.payments = [
-      ...(bill.payments || []),
-      {
-        paidAt: new Date(),
-        amount: mongoose.Types.Decimal128.fromString(String(transfer)),
-        method: "CASH",
-        provider: "OFFLINE",
-        transactionId: `cash-${Date.now()}`,
-        note: "Xác nhận thanh toán tiền mặt bởi ADMIN",
-      },
-    ];
-
-    await bill.save();
-
-    return res.status(200).json({ success: true, message: "Xác nhận thanh toán thành công", data: formatBill(bill) });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: "Lỗi xác nhận thanh toán", error: err.message });
-  }
-};
 
 // Hủy hóa đơn (cancel) — chuyển trạng thái sang VOID
 export const cancelBill = async (req, res) => {
@@ -426,7 +409,13 @@ export const getDraftBills = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const bills = await Bill.find({ status: "DRAFT", billType: "MONTHLY" })
-      .populate("contractId")
+      .populate({
+        path: "contractId",
+        populate: [
+          { path: "roomId", select: "roomNumber pricePerMonth" },
+          { path: "tenantId", select: "fullName email phone" }
+        ]
+      })
       .sort({ billingDate: -1 })
       .limit(limit)
       .skip(skip);
@@ -672,6 +661,171 @@ export const getMyPendingPayment = async (req, res) => {
     res.status(500).json({
       message: "Lỗi khi lấy danh sách hóa đơn chưa thanh toán",
       success: false,
+      error: err.message,
+    });
+  }
+};
+
+// Tenant request thanh toán tiền mặt (chuyển status sang PENDING_CASH_CONFIRM)
+export const requestCashPayment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount } = req.body;
+    const userId = req.user._id;
+
+    // Tìm bill
+    const bill = await Bill.findById(id)
+      .populate("contractId")
+      .populate("finalContractId");
+
+    if (!bill) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy hóa đơn",
+      });
+    }
+
+    // Kiểm tra quyền: bill phải thuộc về user này
+    const contractTenantId = bill.contractId?.tenantId?.toString();
+    const finalContractTenantId = bill.finalContractId?.tenantId?.toString();
+    
+    if (contractTenantId !== userId.toString() && finalContractTenantId !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Bạn không có quyền thao tác với hóa đơn này",
+      });
+    }
+
+    // Kiểm tra trạng thái bill
+    if (bill.status === "PAID") {
+      return res.status(400).json({
+        success: false,
+        message: "Hóa đơn này đã được thanh toán",
+      });
+    }
+
+    if (bill.status === "PENDING_CASH_CONFIRM") {
+      return res.status(400).json({
+        success: false,
+        message: "Hóa đơn này đang chờ admin xác nhận thanh toán tiền mặt",
+      });
+    }
+
+    // Validate amount
+    const amountNum = Number(amount);
+    const amountDue = convertDecimal128(bill.amountDue);
+    const amountPaid = convertDecimal128(bill.amountPaid);
+    const balance = amountDue - amountPaid;
+
+    if (amountNum <= 0 || amountNum > balance) {
+      return res.status(400).json({
+        success: false,
+        message: "Số tiền thanh toán không hợp lệ",
+      });
+    }
+
+    // Chuyển status sang PENDING_CASH_CONFIRM
+    bill.status = "PENDING_CASH_CONFIRM";
+    
+    // Lưu thông tin request vào metadata
+    if (!bill.metadata) bill.metadata = {};
+    bill.metadata.cashPaymentRequest = {
+      requestedAt: new Date(),
+      requestedBy: userId,
+      requestedAmount: amountNum,
+    };
+
+    await bill.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã gửi yêu cầu thanh toán tiền mặt. Vui lòng chờ admin xác nhận.",
+      data: formatBill(bill),
+    });
+  } catch (err) {
+    console.error("requestCashPayment error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi gửi yêu cầu thanh toán tiền mặt",
+      error: err.message,
+    });
+  }
+};
+
+// Admin xác nhận thanh toán tiền mặt
+export const confirmCashPayment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, note } = req.body;
+
+    const bill = await Bill.findById(id);
+    if (!bill) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy hóa đơn",
+      });
+    }
+
+    // Tự động tính amount nếu không được cung cấp (thanh toán toàn bộ số dư)
+    const amountDue = convertDecimal128(bill.amountDue) || 0;
+    const amountPaid = convertDecimal128(bill.amountPaid) || 0;
+    const balance = amountDue - amountPaid;
+    
+    const amountNum = amount ? Number(amount) : balance;
+    
+    if (amountNum <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Số tiền không hợp lệ hoặc hóa đơn đã thanh toán đủ",
+      });
+    }
+    
+    if (amountNum > balance) {
+      return res.status(400).json({
+        success: false,
+        message: "Số tiền thanh toán vượt quá số dư",
+      });
+    }
+
+    // Thêm payment record
+    if (!bill.payments) bill.payments = [];
+    bill.payments.push({
+      paidAt: new Date(),
+      amount: mongoose.Types.Decimal128.fromString(amountNum.toFixed(2)),
+      method: "CASH",
+      provider: "CASH",
+      transactionId: `CASH_${Date.now()}`,
+      note: note || "Thanh toán tiền mặt",
+      confirmedBy: req.user._id,
+    });
+
+    // Cập nhật amountPaid
+    const currentPaid = convertDecimal128(bill.amountPaid) || 0;
+    const newPaid = currentPaid + amountNum;
+    bill.amountPaid = mongoose.Types.Decimal128.fromString(newPaid.toFixed(2));
+
+    // Cập nhật status (sử dụng lại biến amountDue đã khai báo ở trên)
+    if (newPaid >= amountDue) {
+      bill.status = "PAID";
+    } else if (newPaid > 0) {
+      bill.status = "PARTIALLY_PAID";
+    }
+
+    await bill.save();
+
+    // KHÔNG tự động complete checkin cho tiền mặt - cần admin click "Hoàn thành" riêng
+    console.log(`✅ [CONFIRM CASH PAYMENT] Bill ${bill._id} confirmed as PAID - Checkin requires manual completion`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Xác nhận thanh toán tiền mặt thành công",
+      data: formatBill(bill),
+    });
+  } catch (err) {
+    console.error("confirmCashPayment error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi xác nhận thanh toán",
       error: err.message,
     });
   }

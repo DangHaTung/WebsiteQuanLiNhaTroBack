@@ -59,7 +59,7 @@ function verifyMomoSignature(body, secretKey) {
 /** ============ CREATE PAYMENT ============ */
 const createPayment = async (req, res) => {
     try {
-        const { billId, amount: amountRaw, orderInfo = "" } = req.body;
+        const { billId, amount: amountRaw, orderInfo = "", returnUrl } = req.body;
         if (!billId || !amountRaw) return res.status(400).json({ success: false, message: "Thiếu billId hoặc amount" });
 
         const amountNum = Number(amountRaw);
@@ -113,7 +113,12 @@ const createPayment = async (req, res) => {
             amount: mongoose.Types.Decimal128.fromString(amountNum.toFixed(2)),
             status: "PENDING",
             method: "REDIRECT",
-            metadata: { createdFrom: "createPayment", requestedAmount: amountNum, orderInfo },
+            metadata: { 
+                createdFrom: "createPayment", 
+                requestedAmount: amountNum, 
+                orderInfo,
+                returnUrl: returnUrl || null
+            },
         });
 
         // chuẩn bị payload gửi MoMo
@@ -230,12 +235,18 @@ const momoReturn = async (req, res) => {
                 if (payment && payment.status !== "SUCCESS") {
                     await applyPaymentToBill(payment, params);
                 }
+                
+                // Lấy returnUrl từ payment metadata hoặc dùng default
+                const returnUrlFromPayment = payment?.metadata?.returnUrl || `${process.env.FRONTEND_URL || "http://localhost:5173"}/admin/checkins`;
+                const redirectUrl = `${returnUrlFromPayment}?payment=success&provider=momo&transactionId=${orderId}`;
+                
+                return res.redirect(redirectUrl);
             } catch (e) {
                 console.error("momoReturn applyPayment error:", e);
+                return res.send(
+                    `<h2>🎉 Thanh toán thành công</h2><p>Mã giao dịch: ${orderId}</p><p>Số tiền: ${amount}đ</p><a href="/">Về trang chủ</a>`
+                );
             }
-            return res.send(
-                `<h2>🎉 Thanh toán thành công</h2><p>Mã giao dịch: ${orderId}</p><p>Số tiền: ${amount}đ</p><a href="/">Về trang chủ</a>`
-            );
         } else {
             return res.send(
                 `<h2>❌ Thanh toán thất bại</h2><p>Lý do: ${message}</p><a href="/">Thử lại</a>`

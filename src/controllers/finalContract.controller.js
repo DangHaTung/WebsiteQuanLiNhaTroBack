@@ -204,6 +204,15 @@ export const uploadFiles = async (req, res) => {
     fc.status = "SIGNED";
     await fc.save();
 
+    // Cập nhật trạng thái phòng thành OCCUPIED
+    try {
+      const Room = (await import("../models/room.model.js")).default;
+      await Room.findByIdAndUpdate(fc.roomId, { status: "OCCUPIED" });
+      console.log(`✅ Updated room ${fc.roomId} status to OCCUPIED`);
+    } catch (err) {
+      console.warn("Cannot update room status:", err);
+    }
+
     return res.status(200).json({ success: true, message: "Uploaded signed contract files and finalized", data: formatFinalContract(fc) });
   } catch (err) {
     console.error("uploadFiles error:", err);
@@ -500,6 +509,17 @@ export const assignTenantToFinalContract = async (req, res) => {
     // Cho phép cập nhật hoặc gán mới
     fc.tenantId = tenantId;
     await fc.save();
+    
+    // ✅ Cũng update Contract.tenantId để tenant có thể thấy bills
+    if (fc.originContractId) {
+      try {
+        await Contract.findByIdAndUpdate(fc.originContractId, { tenantId });
+        console.log(`✅ Updated Contract ${fc.originContractId} with tenantId ${tenantId}`);
+      } catch (err) {
+        console.warn("Cannot update Contract tenantId:", err);
+      }
+    }
+    
     return res.status(200).json({ success: true, message: "Assigned tenant to final contract", data: formatFinalContract(fc) });
   } catch (err) {
     console.error("assignTenantToFinalContract error:", err);
@@ -559,6 +579,88 @@ export const deleteFileFromFinalContract = async (req, res) => {
   }
 };
 
+// ============== createForCoTenant ==============
+// POST /api/admin/finalcontracts/create-for-cotenant
+// Admin tạo FinalContract cho người ở cùng
+export const createForCoTenant = async (req, res) => {
+  try {
+    const { linkedContractId, tenantInfo, depositAmount, startDate } = req.body;
+
+    if (!linkedContractId || !tenantInfo || !depositAmount) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "linkedContractId, tenantInfo, and depositAmount are required" 
+      });
+    }
+
+    // Kiểm tra Contract chính có tồn tại không
+    const mainContract = await Contract.findById(linkedContractId).populate("roomId");
+    if (!mainContract) {
+      return res.status(404).json({ success: false, message: "Main contract not found" });
+    }
+
+    if (mainContract.status !== "ACTIVE") {
+      return res.status(400).json({ success: false, message: "Main contract is not active" });
+    }
+
+    // Tạo FinalContract cho người ở cùng
+    const finalContract = await FinalContract.create({
+      roomId: mainContract.roomId._id,
+      startDate: startDate ? new Date(startDate) : new Date(),
+      endDate: mainContract.endDate,
+      deposit: toDec(depositAmount),
+      monthlyRent: mainContract.monthlyRent,
+      pricingSnapshot: {
+        roomNumber: mainContract.roomId.roomNumber,
+        monthlyRent: mainContract.monthlyRent,
+        deposit: toDec(depositAmount),
+      },
+      status: "DRAFT",
+      linkedContractId: linkedContractId,
+      isCoTenant: true,
+    });
+
+    // Tạo Bill RECEIPT cho người ở cùng
+    const bill = await Bill.create({
+      finalContractId: finalContract._id,
+      billingDate: new Date(),
+      billType: "RECEIPT",
+      status: "UNPAID",
+      lineItems: [
+        {
+          item: `Tiền cọc phòng ${mainContract.roomId.roomNumber} (Người ở cùng)`,
+          quantity: 1,
+          unitPrice: toDec(depositAmount),
+          lineTotal: toDec(depositAmount),
+        },
+      ],
+      amountDue: toDec(depositAmount),
+      amountPaid: toDec(0),
+      note: `FinalContract cho người ở cùng: ${tenantInfo.fullName}`,
+    });
+
+    console.log(`✅ Created FinalContract for co-tenant: ${finalContract._id}, Bill: ${bill._id}`);
+
+    // Generate payment link
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const paymentLink = `${frontendUrl}/checkin?finalContractId=${finalContract._id}`;
+
+    return res.status(201).json({
+      success: true,
+      message: "FinalContract created for co-tenant",
+      data: {
+        finalContract: formatFinalContract(finalContract),
+        bill: bill,
+        paymentLink: paymentLink,
+        tenantInfo: tenantInfo,
+      },
+    });
+  } catch (err) {
+    console.error("createForCoTenant error:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
 export default {
   createFromContract,
   getFinalContractById,
@@ -572,4 +674,5 @@ export default {
   deleteFinalContractById,
   deleteFileFromFinalContract,
   assignTenantToFinalContract,
+  createForCoTenant,
 };

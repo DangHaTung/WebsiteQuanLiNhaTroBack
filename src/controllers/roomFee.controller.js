@@ -82,6 +82,13 @@ export const calculateRoomFees = async (req, res) => {
     const breakdown = [];
     let total = 0;
 
+    // Tiền thuê phòng (rent)
+    const monthlyRent = room.pricePerMonth ? parseFloat(room.pricePerMonth.toString()) : 0;
+    if (monthlyRent > 0) {
+      breakdown.push({ type: "rent", baseRate: monthlyRent, total: monthlyRent });
+      total += monthlyRent;
+    }
+
     // Electricity
     if (rf.appliedTypes.includes("electricity")) {
       const activeEl = await UtilityFee.findOne({ type: "electricity", isActive: true });
