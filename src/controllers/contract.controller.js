@@ -1,6 +1,9 @@
+import mongoose from "mongoose";
 import Contract from "../models/contract.model.js";
 import Checkin from "../models/checkin.model.js";
 import Bill from "../models/bill.model.js";
+import User from "../models/user.model.js";
+import Room from "../models/room.model.js";
 
 /**
  * Helper convert Decimal128 sang number
@@ -77,25 +80,37 @@ export const getMyContracts = async (req, res) => {
 // Lấy toàn bộ hợp đồng (admin)
 export const getAllContracts = async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 100, status } = req.query;
     const skip = (page - 1) * limit;
 
-    const contracts = await Contract.find()
+    const filter = {};
+    if (status) {
+      filter.status = status;
+    }
+
+    const contracts = await Contract.find(filter)
       .populate("tenantId", "fullName email phone")
       .populate("roomId", "roomNumber pricePerMonth")
       .sort({ createdAt: -1 })
-      .limit(limit)
+      .limit(parseInt(limit))
       .skip(skip);
 
-    const total = await Contract.countDocuments();
+    const total = await Contract.countDocuments(filter);
 
     // Format contracts để chuyển đổi Decimal128 sang number
     const formattedContracts = contracts.map(formatContract);
+    
+    // Deduplicate by _id để tránh trả về duplicate
+    const uniqueContracts = Array.from(
+      new Map(formattedContracts.map(c => [c._id.toString(), c])).values()
+    );
+    
+    console.log(`📊 getAllContracts: Found ${contracts.length} contracts, after dedup: ${uniqueContracts.length}`);
 
     res.status(200).json({
       success: true,
       message: "Lấy danh sách hợp đồng thành công",
-      data: formattedContracts,
+      data: uniqueContracts,
       pagination: {
         currentPage: parseInt(page),
         totalPages: Math.ceil(total / limit),
@@ -304,54 +319,361 @@ export const deleteContract = async (req, res) => {
 // Hoàn cọc khi hợp đồng kết thúc (không gia hạn)
 export const refundDeposit = async (req, res) => {
   try {
+    console.log('[refundDeposit] Start processing refund for contract:', req.params.id);
+    console.log('[refundDeposit] Body:', req.body);
+    
     const isAdmin = req.user?.role === "ADMIN";
     if (!isAdmin) return res.status(403).json({ success: false, message: "Forbidden" });
 
     const { id } = req.params;
-    const { method = "BANK", transactionId, note } = req.body || {};
+    const { 
+      electricityKwh = 0, 
+      waterM3 = 0,
+      occupantCount,
+      vehicleCount = 0,
+      damageAmount = 0, 
+      damageNote = "",
+      method = "BANK", 
+      transactionId, 
+      note 
+    } = req.body || {};
 
-    const contract = await Contract.findById(id).populate("tenantId");
-    if (!contract) return res.status(404).json({ success: false, message: "Không tìm thấy hợp đồng" });
+    const contract = await Contract.findById(id)
+      .populate("tenantId", "fullName email phone")
+      .populate("roomId", "roomNumber pricePerMonth type");
 
-    if (contract.status !== "ENDED") {
-      return res.status(400).json({ success: false, message: "Hợp đồng chưa ở trạng thái ENDED" });
+    if (!contract) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hợp đồng" });
     }
+
     if (contract.depositRefunded) {
-      return res.status(200).json({ success: true, message: "Đã hoàn cọc trước đó", data: contract });
+      return res.status(400).json({ success: false, message: "Đã hoàn cọc trước đó" });
     }
 
-    // Kiểm tra công nợ còn lại
-    const bills = await Bill.find({ contractId: contract._id });
-    let remaining = 0;
-    let totalPaid = 0;
-    for (const b of bills) {
-      const due = convertDecimal128(b.amountDue) || 0;
-      const paid = convertDecimal128(b.amountPaid) || 0;
-      remaining += Math.max(0, due - paid);
-      totalPaid += paid;
-    }
-    if (remaining > 0.0001) {
-      return res.status(400).json({ success: false, message: "Còn công nợ chưa thanh toán — không thể hoàn cọc" });
-    }
+    // Tính số người ở (nếu không được truyền)
+    const finalOccupantCount = occupantCount !== undefined 
+      ? occupantCount 
+      : 1 + (contract.coTenants?.filter(ct => !ct.leftAt).length || 0);
 
-    const depositRequired = convertDecimal128(contract.deposit) || 0;
-    if (totalPaid + 0.0001 < depositRequired) {
-      return res.status(400).json({ success: false, message: "Chưa thanh toán đủ tiền cọc" });
-    }
+    // Tính dịch vụ tháng cuối (BỎ tiền thuê phòng)
+    console.log('[refundDeposit] Calculating service fees...');
+    const { calculateRoomMonthlyFees } = await import("../services/billing/monthlyBill.service.js");
+    const serviceFees = await calculateRoomMonthlyFees({
+      roomId: contract.roomId._id,
+      electricityKwh: Number(electricityKwh),
+      waterM3: Number(waterM3),
+      occupantCount: finalOccupantCount,
+      vehicleCount: Number(vehicleCount) || 0,
+      excludeRent: true, // BỎ tiền thuê phòng
+    });
+    console.log('[refundDeposit] Service fees calculated:', serviceFees.totalAmount);
 
+    const depositAmount = convertDecimal128(contract.deposit) || 0;
+    const damageAmountNum = Number(damageAmount) || 0;
+    const refundAmount = depositAmount - serviceFees.totalAmount - damageAmountNum;
+    
+    console.log('[refundDeposit] Calculation: deposit=', depositAmount, 'serviceFees=', serviceFees.totalAmount, 'damage=', damageAmountNum, 'refund=', refundAmount);
+
+    // Cập nhật contract (giữ lại co-tenants, không xóa)
+    contract.status = "ENDED"; // Set sang ENDED khi hoàn cọc
     contract.depositRefunded = true;
     contract.depositRefund = {
-      amount: contract.deposit,
+      amount: mongoose.Types.Decimal128.fromString(refundAmount.toFixed(2)),
       refundedAt: new Date(),
       method,
       transactionId,
       note,
+      damageAmount: mongoose.Types.Decimal128.fromString(damageAmountNum.toFixed(2)),
+      damageNote,
+      finalMonthServiceFee: mongoose.Types.Decimal128.fromString(serviceFees.totalAmount.toFixed(2)),
     };
     await contract.save();
 
-    return res.status(200).json({ success: true, message: "Hoàn cọc thành công", data: formatContract(contract) });
+    // 1. Cancel FinalContract của người thuê chính (KHÔNG cancel FinalContract của co-tenant)
+    const FinalContract = (await import("../models/finalContract.model.js")).default;
+    
+    // Tìm FinalContract của người thuê chính:
+    // - originContractId = contract._id (FinalContract chính)
+    // - KHÔNG phải isCoTenant = true (không phải FinalContract của co-tenant)
+    // - tenantId = contract.tenantId (người thuê chính)
+    const finalContractQuery = {
+      originContractId: contract._id, // Chỉ tìm FinalContract có originContractId = contract._id (người thuê chính)
+      isCoTenant: { $ne: true }, // KHÔNG phải FinalContract của co-tenant
+      status: { $in: ["DRAFT", "WAITING_SIGN", "SIGNED"] }
+    };
+    
+    // Nếu có tenantId, thêm điều kiện tenantId để chắc chắn
+    if (contract.tenantId) {
+      finalContractQuery.tenantId = contract.tenantId;
+    }
+    
+    const finalContract = await FinalContract.findOne(finalContractQuery);
+
+    if (finalContract) {
+      console.log(`[refundDeposit] Found FinalContract ${finalContract._id} (status: ${finalContract.status}) for main tenant ${contract.tenantId}, canceling...`);
+      finalContract.status = "CANCELED";
+      await finalContract.save();
+      console.log(`[refundDeposit] FinalContract ${finalContract._id} canceled successfully`);
+    } else {
+      console.log(`[refundDeposit] No FinalContract found for main tenant contract ${contract._id}`);
+      console.log(`[refundDeposit] Search query:`, JSON.stringify(finalContractQuery, null, 2));
+    }
+    
+    // 2. Xử lý co-tenants: Tạo FinalContract mới cho co-tenant (nếu chưa có)
+    const activeCoTenants = contract.coTenants?.filter(ct => !ct.leftAt && ct.userId) || [];
+    
+    if (activeCoTenants.length > 0) {
+      console.log(`[refundDeposit] Found ${activeCoTenants.length} active co-tenant(s), processing...`);
+      
+      // Kiểm tra FinalContract của co-tenants
+      const coTenantFinalContracts = await FinalContract.find({
+        linkedContractId: contract._id,
+        isCoTenant: true,
+        status: { $in: ["DRAFT", "WAITING_SIGN", "SIGNED"] }
+      }).select("_id tenantId status");
+      
+      console.log(`[refundDeposit] Existing co-tenant FinalContracts:`, coTenantFinalContracts.length);
+      
+      // Với mỗi co-tenant chưa có FinalContract, tạo FinalContract mới
+      for (const coTenant of activeCoTenants) {
+        const hasFinalContract = coTenantFinalContracts.some(fc => 
+          fc.tenantId?.toString() === coTenant.userId?.toString()
+        );
+        
+        if (!hasFinalContract && coTenant.userId) {
+          console.log(`[refundDeposit] Creating new FinalContract for co-tenant ${coTenant.fullName} (userId: ${coTenant.userId})`);
+          
+          // Tạo FinalContract mới cho co-tenant
+          const newCoTenantFinalContract = await FinalContract.create({
+            tenantId: coTenant.userId,
+            roomId: contract.roomId._id,
+            startDate: contract.startDate,
+            endDate: contract.endDate,
+            deposit: contract.deposit, // Co-tenant cũng có cọc riêng
+            monthlyRent: contract.monthlyRent,
+            pricingSnapshot: {
+              roomNumber: contract.pricingSnapshot?.roomNumber || contract.roomId?.roomNumber,
+              monthlyRent: contract.monthlyRent,
+              deposit: contract.deposit,
+            },
+            status: "DRAFT",
+            linkedContractId: contract._id,
+            isCoTenant: true,
+          });
+          
+          console.log(`[refundDeposit] Created FinalContract ${newCoTenantFinalContract._id} for co-tenant ${coTenant.fullName}`);
+        } else {
+          console.log(`[refundDeposit] Co-tenant ${coTenant.fullName} already has FinalContract, keeping active`);
+        }
+      }
+    } else {
+      console.log(`[refundDeposit] No active co-tenants found`);
+    }
+
+    // 3. Cập nhật Checkin: set depositDisposition = "REFUNDED"
+    const checkin = await Checkin.findOne({ contractId: contract._id });
+
+    if (checkin) {
+      console.log(`[refundDeposit] Found Checkin ${checkin._id}, setting depositDisposition = REFUNDED...`);
+      checkin.depositDisposition = "REFUNDED";
+      await checkin.save();
+      console.log(`[refundDeposit] Checkin ${checkin._id} updated successfully`);
+    } else {
+      console.log(`[refundDeposit] No Checkin found for contract ${contract._id}`);
+    }
+
+    return res.status(200).json({ 
+      success: true, 
+      message: "Hoàn cọc thành công", 
+      data: {
+        contract: formatContract(contract),
+        calculation: {
+          deposit: depositAmount,
+          serviceFees: serviceFees.totalAmount,
+          serviceFeesBreakdown: serviceFees.breakdown,
+          damageAmount: damageAmountNum,
+          refundAmount: refundAmount,
+        }
+      }
+    });
   } catch (error) {
     console.error("refundDeposit error:", error);
     return res.status(500).json({ success: false, message: "Lỗi khi hoàn cọc", error: error.message });
+  }
+};
+
+// ============== linkCoTenantToContract ==============
+// POST /api/admin/contracts/:id/link-cotenant
+// Admin link user (đã thanh toán FinalContract) vào Contract như co-tenant
+export const linkCoTenantToContract = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId, finalContractId } = req.body;
+
+    if (!userId || !finalContractId) {
+      return res.status(400).json({
+        success: false,
+        message: "userId and finalContractId are required",
+      });
+    }
+
+    const contract = await Contract.findById(id);
+    if (!contract) {
+      return res.status(404).json({ success: false, message: "Contract not found" });
+    }
+
+    // Kiểm tra FinalContract
+    const FinalContract = (await import("../models/finalContract.model.js")).default;
+    const finalContract = await FinalContract.findById(finalContractId);
+    if (!finalContract) {
+      return res.status(404).json({ success: false, message: "FinalContract not found" });
+    }
+
+    if (!finalContract.isCoTenant || finalContract.linkedContractId?.toString() !== id) {
+      return res.status(400).json({
+        success: false,
+        message: "FinalContract is not linked to this contract",
+      });
+    }
+
+    // Kiểm tra user
+    const User = (await import("../models/user.model.js")).default;
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // Kiểm tra đã tồn tại chưa
+    const exists = contract.coTenants?.find((ct) => ct.userId?.toString() === userId);
+    if (exists) {
+      return res.status(400).json({
+        success: false,
+        message: "User already linked as co-tenant",
+      });
+    }
+
+    // Thêm vào coTenants
+    if (!contract.coTenants) contract.coTenants = [];
+    contract.coTenants.push({
+      userId: userId,
+      fullName: user.fullName,
+      phone: user.phone,
+      email: user.email,
+      identityNo: user.identityNo,
+      joinedAt: new Date(),
+      finalContractId: finalContractId,
+    });
+
+    await contract.save();
+
+    console.log(`✅ Linked user ${userId} as co-tenant to contract ${id}`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Linked co-tenant successfully",
+      data: formatContract(contract),
+    });
+  } catch (error) {
+    console.error("linkCoTenantToContract error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi link co-tenant",
+      error: error.message,
+    });
+  }
+};
+
+// ============== addCoTenant ==============
+// POST /api/contracts/:id/add-cotenant
+// Admin thêm người ở cùng vào contract và tạo user luôn
+export const addCoTenant = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { fullName, phone, email, password, identityNo } = req.body;
+
+    if (!fullName || !phone || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "fullName, phone, email, and password are required",
+      });
+    }
+
+    const contract = await Contract.findById(id);
+    if (!contract) {
+      return res.status(404).json({ success: false, message: "Contract not found" });
+    }
+
+    // Kiểm tra đã tồn tại chưa (theo phone)
+    const exists = contract.coTenants?.find((ct) => ct.phone === phone);
+    if (exists) {
+      return res.status(400).json({
+        success: false,
+        message: "Số điện thoại này đã được thêm vào hợp đồng",
+      });
+    }
+
+    // Tạo user mới
+    const User = (await import("../models/user.model.js")).default;
+    const bcrypt = (await import("bcrypt")).default;
+
+    // Check email đã tồn tại chưa
+    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: "Email hoặc số điện thoại đã được sử dụng",
+      });
+    }
+
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    // Tạo user
+    const newUser = await User.create({
+      fullName,
+      email,
+      phone,
+      passwordHash,
+      role: "TENANT",
+      identityNo,
+    });
+
+    console.log(`✅ Created user ${newUser._id} for co-tenant ${fullName}`);
+
+    // Thêm vào coTenants với userId
+    if (!contract.coTenants) contract.coTenants = [];
+    contract.coTenants.push({
+      userId: newUser._id,
+      fullName,
+      phone,
+      email,
+      identityNo,
+      joinedAt: new Date(),
+    });
+
+    await contract.save();
+
+    console.log(`✅ Added co-tenant ${fullName} to contract ${id}`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Thêm người ở cùng thành công. Họ có thể đăng nhập ngay bây giờ.",
+      data: {
+        contract: formatContract(contract),
+        user: {
+          _id: newUser._id,
+          fullName: newUser.fullName,
+          email: newUser.email,
+          phone: newUser.phone,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("addCoTenant error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi thêm người ở cùng",
+      error: error.message,
+    });
   }
 };

@@ -60,9 +60,28 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
 
             await bill.save({ session });
 
+            // Giữ lại returnUrl từ metadata cũ khi update
+            const oldReturnUrl = payment.metadata?.returnUrl;
             payment.status = "SUCCESS";
-            payment.metadata = rawParams;
+            payment.metadata = { ...rawParams, returnUrl: oldReturnUrl };
             await payment.save({ session });
+
+            // Tự động complete checkin nếu là bill RECEIPT đã PAID
+            if (bill.billType === "RECEIPT" && bill.status === "PAID") {
+                console.log(`🔍 Bill is RECEIPT and PAID, checking for checkin with receiptBillId: ${bill._id}`);
+                const Checkin = (await import("../models/checkin.model.js")).default;
+                const checkin = await Checkin.findOne({ receiptBillId: bill._id }).session(session);
+                console.log(`🔍 Found checkin:`, checkin ? `ID=${checkin._id}, status=${checkin.status}` : 'null');
+                if (checkin && checkin.status === "CREATED") {
+                    checkin.status = "COMPLETED";
+                    await checkin.save({ session });
+                    console.log(`✅ Auto-completed checkin ${checkin._id} after payment`);
+                } else if (checkin) {
+                    console.log(`⚠️ Checkin found but status is ${checkin.status}, not CREATED`);
+                } else {
+                    console.log(`⚠️ No checkin found with receiptBillId: ${bill._id}`);
+                }
+            }
         });
     } catch (err) {
         // fallback nếu MongoDB không hỗ trợ transaction
@@ -111,9 +130,28 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
 
         await bill.save();
 
+        // Giữ lại returnUrl từ metadata cũ khi update (fallback mode)
+        const oldReturnUrl = payment.metadata?.returnUrl;
         payment.status = "SUCCESS";
-        payment.metadata = rawParams;
+        payment.metadata = { ...rawParams, returnUrl: oldReturnUrl };
         await payment.save();
+
+        // Tự động complete checkin nếu là bill RECEIPT đã PAID (fallback mode)
+        if (bill.billType === "RECEIPT" && bill.status === "PAID") {
+            console.log(`🔍 [FALLBACK] Bill is RECEIPT and PAID, checking for checkin with receiptBillId: ${bill._id}`);
+            const Checkin = (await import("../models/checkin.model.js")).default;
+            const checkin = await Checkin.findOne({ receiptBillId: bill._id });
+            console.log(`🔍 [FALLBACK] Found checkin:`, checkin ? `ID=${checkin._id}, status=${checkin.status}` : 'null');
+            if (checkin && checkin.status === "CREATED") {
+                checkin.status = "COMPLETED";
+                await checkin.save();
+                console.log(`✅ Auto-completed checkin ${checkin._id} after payment (fallback)`);
+            } else if (checkin) {
+                console.log(`⚠️ [FALLBACK] Checkin found but status is ${checkin.status}, not CREATED`);
+            } else {
+                console.log(`⚠️ [FALLBACK] No checkin found with receiptBillId: ${bill._id}`);
+            }
+        }
     } finally {
         if (session) session.endSession();
     }
@@ -126,7 +164,7 @@ export const createPayment = async (req, res) => {
     console.log('[HANDLER] createPayment called', req.method, req.originalUrl, 'authHeader=', req.headers.authorization);
 
     try {
-        const { billId, amount, provider = "VNPAY", bankCode } = req.body;
+        const { billId, amount, provider = "VNPAY", bankCode, returnUrl } = req.body;
         if (!billId || !amount) return res.status(400).json({ error: "billId and amount required" });
 
         const bill = await Bill.findById(billId);
@@ -142,7 +180,8 @@ export const createPayment = async (req, res) => {
         // generate local transactionId (we use this as vnp_TxnRef)
         const txnRef = uuidv4().replace(/-/g, "");
 
-        // create Payment record (PENDING)
+        // create Payment record (PENDING) with returnUrl in metadata
+        console.log("💾 Creating payment with returnUrl:", returnUrl);
         const payment = await Payment.create({
             billId,
             provider: providerUpper,
@@ -150,7 +189,9 @@ export const createPayment = async (req, res) => {
             amount: mongoose.Types.Decimal128.fromString(Number(amount).toFixed(2)),
             status: "PENDING",
             method: "REDIRECT",
+            metadata: { returnUrl: returnUrl || null },
         });
+        console.log("✅ Payment created with metadata:", payment.metadata);
 
         // build provider URL (VNPay example)
         if (providerUpper === "VNPAY") {
@@ -200,10 +241,19 @@ export const vnpayReturn = async (req, res) => {
         if (rspCode === "00") {
             // apply payment via transaction helper, sau đó redirect về frontend success
             try {
+                // Lưu returnUrl TRƯỚC KHI apply (vì applyPaymentToBill sẽ ghi đè metadata)
+                const savedReturnUrl = payment.metadata?.returnUrl;
+                console.log("💾 Saved returnUrl before apply:", savedReturnUrl);
+                
                 await applyPaymentToBill(payment, params);
-                const successUrl = process.env.FRONTEND_SUCCESS_URL || "http://localhost:5173/payment-success";
-                const qs = new URLSearchParams({ orderId: String(txnRef || ""), amount: String(params.vnp_Amount || "") }).toString();
-                return res.redirect(`${successUrl}?${qs}`);
+                
+                // Ưu tiên returnUrl đã lưu, fallback về default
+                const returnUrl = savedReturnUrl || `${process.env.FRONTEND_URL || "http://localhost:5173"}/admin/checkins`;
+                console.log("🔗 Using returnUrl:", returnUrl);
+                const redirectUrl = `${returnUrl}?payment=success&provider=vnpay&transactionId=${txnRef}`;
+                console.log("➡️ Redirecting to:", redirectUrl);
+                
+                return res.redirect(redirectUrl);
             } catch (e) {
                 console.error("applyPaymentToBill error (return):", e);
                 return res.status(500).send("Server error while applying payment");

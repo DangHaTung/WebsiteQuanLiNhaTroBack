@@ -27,6 +27,7 @@ import checkinPublicRoute from "./routers/checkin.public.route.js"; // PUBLIC ch
 import finalContractRoute from "./routers/finalContract.route.js"; // PROTECTED final contract routes
 import monthlyBillRoute from "./routers/monthlyBill.route.js"; // Monthly bill generation routes
 import notificationRoute from "./routers/notification.route.js"; // Notification routes
+import moveOutRequestRoute from "./routers/moveOutRequest.route.js"; // Move-out request routes
 import { scheduleMonthlyBillingJob } from "./jobs/monthlyBilling.job.js"; // Cron job tự động tạo hóa đơn
 import { scheduleRentReminderJob } from "./jobs/rentReminder.job.js"; // Cron job nhắc nhở thanh toán
 import { scheduleUpcomingBillJob } from "./jobs/upcomingBill.job.js"; // Cron job thông báo hóa đơn sắp tới
@@ -58,6 +59,7 @@ app.use("/api", checkinPublicRoute);   // /checkin/cash
 app.use("/api/complaints", complaintPublicRoute); // PUBLIC complaint routes
 
 // Đăng ký PROTECTED routes (cần auth)
+app.use("/api", moveOutRequestRoute); // Move-out request routes (Client + Admin) - Đặt trước các route khác
 app.use("/api", authRoute);
 app.use("/api", tenantRoute);   // ADMIN tenant routes
 app.use("/api", billRoute);     // ADMIN bill routes

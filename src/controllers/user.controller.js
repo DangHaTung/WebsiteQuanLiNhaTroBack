@@ -126,7 +126,8 @@ export const createUser = async (req, res) => {
       success: true,
       message: "Tạo người dùng thành công",
       data: {
-        id: newUser._id,
+        _id: newUser._id,
+        id: newUser._id, // Backward compatibility
         fullName: newUser.fullName,
         email: newUser.email,
         phone: newUser.phone,
@@ -176,7 +177,8 @@ export const updateUser = async (req, res) => {
       success: true,
       message: "Cập nhật người dùng thành công",
       data: {
-        id: user._id,
+        _id: user._id,
+        id: user._id, // Backward compatibility
         fullName: user.fullName,
         email: user.email,
         phone: user.phone,
@@ -239,7 +241,7 @@ export const activateTenantIfContractBillPaid = async (req, res) => {
 
     user.isActive = true;
     await user.save();
-    return res.status(200).json({ success: true, message: "Đã kích hoạt tài khoản Tenant", data: { id: user._id, isActive: user.isActive } });
+    return res.status(200).json({ success: true, message: "Đã kích hoạt tài khoản Tenant", data: { _id: user._id, id: user._id, isActive: user.isActive } });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Lỗi khi kích hoạt tài khoản", error: error.message });
   }

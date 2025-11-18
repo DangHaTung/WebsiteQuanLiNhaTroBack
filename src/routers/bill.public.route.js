@@ -1,5 +1,5 @@
 import express from "express";
-import { getAllBills, getMyBills, getBillById } from "../controllers/bill.controller.js";
+import { getMyBills, getBillById, getBillsByFinalContractId, getMyPendingPayment, requestCashPayment } from "../controllers/bill.controller.js";
 import { validatePagination, validateParams } from "../middleware/validation.middleware.js";
 import { billParamsSchema } from "../validations/bill.validation.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
@@ -14,10 +14,13 @@ router.get("/bills/my-bills", authenticateToken, validatePagination(), asyncHand
 router.get("/bills/public/:id", authenticateToken, validateParams(billParamsSchema), asyncHandler(getBillById));
 
 // Route: Lấy danh sách bill chưa thanh toán
-router.get("/bills/pending-payment", authenticateToken, asyncHandler(async (req, res) => {
-  const { getMyPendingPayment } = await import("../controllers/bill.controller.js");
-  return getMyPendingPayment(req, res);
-}));
+router.get("/bills/pending-payment", authenticateToken, asyncHandler(getMyPendingPayment));
+
+// Route: Lấy bills theo finalContractId
+router.get("/bills/final-contract/:finalContractId", authenticateToken, asyncHandler(getBillsByFinalContractId));
+
+// Route: Tenant request thanh toán tiền mặt
+router.post("/bills/:id/pay-cash", authenticateToken, validateParams(billParamsSchema), asyncHandler(requestCashPayment));
 
 export default router;
 

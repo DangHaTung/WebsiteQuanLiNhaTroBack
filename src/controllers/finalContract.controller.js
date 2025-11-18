@@ -38,34 +38,19 @@ const formatFinalContract = (fc) => {
     if (!base) return file;
     // Robustly detect resource type even if old records miss resource_type/format
     const isRawByUrl = base.includes("/raw/upload/");
-    const isImageByUrl = base.includes("/image/upload/");
     const isRaw = file?.resource_type ? file.resource_type === "raw" : isRawByUrl;
-    const isImage = file?.resource_type ? file.resource_type === "image" : isImageByUrl;
-    // Cloudinary expects flags in the URL PATH, not query string.
-    // Build a friendly filename WITH extension when available (prevents wrong app association on other machines)
-    const basename = (file?.public_id || "download").split("/").pop();
-    // Determine extension
-    let ext = "";
-    if (file?.format) {
-      ext = `.${file.format}`;
-    } else if (isRaw) {
-      ext = ".pdf";
-    } else {
-      const match = base.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
-      ext = match ? `.${match[1]}` : "";
-    }
-    const filenameWithExt = `${basename}${ext}`;
 
     // Download: force attachment (do not include extension in flag param to avoid 400)
     const downloadUrl = base.replace("/upload/", "/upload/fl_attachment/");
 
-    // Inline view:
-    // - Images: base URL already delivers inline → reuse base
-    // - PDFs (raw): use preview image URL for inline viewing
-    // Inline: unify behavior — always equal to base
-    const inlineUrl = base;
+    // Inline view: Remove fl_attachment if exists, then add fl_inline for PDFs
+    let inlineUrl = base.replace("/upload/fl_attachment/", "/upload/");
+    if (isRaw || file?.format === "pdf") {
+      // For PDFs, ensure fl_inline flag for browser viewing
+      inlineUrl = inlineUrl.replace("/upload/", "/upload/fl_inline/");
+    }
 
-    return { ...file, viewUrl: base, downloadUrl, inlineUrl };
+    return { ...file, viewUrl: inlineUrl, downloadUrl, inlineUrl };
   };
   if (Array.isArray(obj.images)) {
     obj.images = obj.images.map(addFileLinks);
@@ -140,23 +125,22 @@ export const createFromContract = async (req, res) => {
       status: "DRAFT",
     });
 
-    // Create bill_contract for the first month rent, if not existing
-    const existingContractBill = await Bill.findOne({ contractId: contract._id, billType: "CONTRACT" });
-    if (!existingContractBill) {
-      await Bill.create({
-        contractId: contract._id,
-        billingDate: new Date(),
-        billType: "CONTRACT",
-        status: "UNPAID",
-        lineItems: [
-          { item: "Tiền thuê tháng đầu", quantity: 1, unitPrice: contract.monthlyRent, lineTotal: contract.monthlyRent },
-        ],
-        amountDue: contract.monthlyRent,
-        amountPaid: toDec(0),
-        payments: [],
-        note: "Bill hợp đồng (tháng đầu) được tạo khi sinh hợp đồng chính thức",
-      });
-    }
+    // Create bill_contract for the first month rent
+    // Mỗi FinalContract có 1 bill CONTRACT riêng
+    await Bill.create({
+      contractId: contract._id,
+      finalContractId: finalContract._id, // Link to this specific FinalContract
+      billingDate: new Date(),
+      billType: "CONTRACT",
+      status: "UNPAID",
+      lineItems: [
+        { item: "Tiền thuê tháng đầu", quantity: 1, unitPrice: contract.monthlyRent, lineTotal: contract.monthlyRent },
+      ],
+      amountDue: contract.monthlyRent,
+      amountPaid: toDec(0),
+      payments: [],
+      note: `Bill hợp đồng (tháng đầu) cho FinalContract ${finalContract._id}`,
+    });
 
     const populated = await FinalContract.findById(finalContract._id)
       .populate("tenantId", "fullName email phone role")
@@ -220,6 +204,15 @@ export const uploadFiles = async (req, res) => {
     fc.status = "SIGNED";
     await fc.save();
 
+    // Cập nhật trạng thái phòng thành OCCUPIED
+    try {
+      const Room = (await import("../models/room.model.js")).default;
+      await Room.findByIdAndUpdate(fc.roomId, { status: "OCCUPIED" });
+      console.log(`✅ Updated room ${fc.roomId} status to OCCUPIED`);
+    } catch (err) {
+      console.warn("Cannot update room status:", err);
+    }
+
     return res.status(200).json({ success: true, message: "Uploaded signed contract files and finalized", data: formatFinalContract(fc) });
   } catch (err) {
     console.error("uploadFiles error:", err);
@@ -259,7 +252,7 @@ export const uploadCCCDFile = async (req, res) => {
 // Stream a file inline (primarily for PDFs uploaded as raw)
 export const viewFileInline = async (req, res) => {
   try {
-    const { id, index } = req.params;
+    const { id, type, index } = req.params;
     const idx = parseInt(index, 10);
     const fc = await FinalContract.findById(id);
     if (!fc) return res.status(404).json({ success: false, message: "Final contract not found" });
@@ -268,7 +261,8 @@ export const viewFileInline = async (req, res) => {
     const isOwnerTenant = fc.tenantId?.toString() === req.user?._id?.toString();
     if (!isAdmin && !isOwnerTenant) return res.status(403).json({ success: false, message: "Forbidden" });
 
-    const files = fc.images || [];
+    // Select correct file array based on type
+    const files = type === "cccd" ? (fc.cccdFiles || []) : (fc.images || []);
     if (idx < 0 || idx >= files.length) {
       return res.status(404).json({ success: false, message: "File not found" });
     }
@@ -276,14 +270,14 @@ export const viewFileInline = async (req, res) => {
     const base = file?.secure_url || file?.url;
     if (!base) return res.status(404).json({ success: false, message: "File URL not available" });
 
-    // Only proxy PDFs (raw)
-    const isRawByUrl = base.includes("/raw/upload/") || file?.resource_type === "raw";
+    // Check if it's a PDF/raw file
+    const isRawByUrl = base.includes("/raw/upload/") || file?.resource_type === "raw" || file?.format === "pdf";
     if (!isRawByUrl) {
-      // For non-PDFs, redirect to base view URL
+      // For non-PDFs (images), redirect to Cloudinary URL
       return res.redirect(base);
     }
 
-    // Stream from Cloudinary and override headers for inline viewing
+    // Stream PDF from Cloudinary and override headers for inline viewing
     const axios = (await import("axios")).default;
     const response = await axios.get(base, { responseType: "stream" });
     res.setHeader("Content-Type", "application/pdf");
@@ -380,7 +374,20 @@ export const getMyFinalContracts = async (req, res) => {
 
     const total = await FinalContract.countDocuments({ tenantId: userId });
 
-    const formattedContracts = finalContracts.map(formatFinalContract);
+    // Đếm số người ở trong mỗi phòng
+    const formattedContracts = await Promise.all(finalContracts.map(async (fc) => {
+      const formatted = formatFinalContract(fc);
+      if (fc.roomId?._id) {
+        // Đếm số FinalContract SIGNED có cùng roomId
+        const occupantCount = await FinalContract.countDocuments({
+          roomId: fc.roomId._id,
+          status: "SIGNED",
+          tenantId: { $exists: true, $ne: null }
+        });
+        formatted.occupantCount = occupantCount;
+      }
+      return formatted;
+    }));
 
     return res.status(200).json({
       success: true,
@@ -502,6 +509,17 @@ export const assignTenantToFinalContract = async (req, res) => {
     // Cho phép cập nhật hoặc gán mới
     fc.tenantId = tenantId;
     await fc.save();
+    
+    // ✅ Cũng update Contract.tenantId để tenant có thể thấy bills
+    if (fc.originContractId) {
+      try {
+        await Contract.findByIdAndUpdate(fc.originContractId, { tenantId });
+        console.log(`✅ Updated Contract ${fc.originContractId} with tenantId ${tenantId}`);
+      } catch (err) {
+        console.warn("Cannot update Contract tenantId:", err);
+      }
+    }
+    
     return res.status(200).json({ success: true, message: "Assigned tenant to final contract", data: formatFinalContract(fc) });
   } catch (err) {
     console.error("assignTenantToFinalContract error:", err);
@@ -561,6 +579,112 @@ export const deleteFileFromFinalContract = async (req, res) => {
   }
 };
 
+// ============== createForCoTenant ==============
+// POST /api/admin/finalcontracts/create-for-cotenant
+// Admin tạo FinalContract cho người ở cùng
+export const createForCoTenant = async (req, res) => {
+  try {
+    const { linkedContractId, tenantInfo, depositAmount, startDate } = req.body;
+
+    if (!linkedContractId || !tenantInfo || !depositAmount) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "linkedContractId, tenantInfo, and depositAmount are required" 
+      });
+    }
+
+    // Kiểm tra Contract chính có tồn tại không
+    const mainContract = await Contract.findById(linkedContractId).populate("roomId");
+    if (!mainContract) {
+      return res.status(404).json({ success: false, message: "Main contract not found" });
+    }
+
+    if (mainContract.status !== "ACTIVE") {
+      return res.status(400).json({ success: false, message: "Main contract is not active" });
+    }
+
+    // Tạo FinalContract cho người ở cùng
+    const finalContract = await FinalContract.create({
+      roomId: mainContract.roomId._id,
+      startDate: startDate ? new Date(startDate) : new Date(),
+      endDate: mainContract.endDate,
+      deposit: toDec(depositAmount),
+      monthlyRent: mainContract.monthlyRent,
+      pricingSnapshot: {
+        roomNumber: mainContract.roomId.roomNumber,
+        monthlyRent: mainContract.monthlyRent,
+        deposit: toDec(depositAmount),
+      },
+      status: "DRAFT",
+      linkedContractId: linkedContractId,
+      isCoTenant: true,
+    });
+
+    // Tạo Bill RECEIPT cho người ở cùng
+    const bill = await Bill.create({
+      finalContractId: finalContract._id,
+      billingDate: new Date(),
+      billType: "RECEIPT",
+      status: "UNPAID",
+      lineItems: [
+        {
+          item: `Tiền cọc phòng ${mainContract.roomId.roomNumber} (Người ở cùng)`,
+          quantity: 1,
+          unitPrice: toDec(depositAmount),
+          lineTotal: toDec(depositAmount),
+        },
+      ],
+      amountDue: toDec(depositAmount),
+      amountPaid: toDec(0),
+      note: `FinalContract cho người ở cùng: ${tenantInfo.fullName}`,
+    });
+
+    console.log(`✅ Created FinalContract for co-tenant: ${finalContract._id}, Bill: ${bill._id}`);
+
+    // Generate payment link
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const paymentLink = `${frontendUrl}/checkin?finalContractId=${finalContract._id}`;
+
+    return res.status(201).json({
+      success: true,
+      message: "FinalContract created for co-tenant",
+      data: {
+        finalContract: formatFinalContract(finalContract),
+        bill: bill,
+        paymentLink: paymentLink,
+        tenantInfo: tenantInfo,
+      },
+    });
+  } catch (err) {
+    console.error("createForCoTenant error:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+// Cancel FinalContract (soft delete)
+export const cancelFinalContract = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const fc = await FinalContract.findById(id);
+    if (!fc) {
+      return res.status(404).json({ success: false, message: "Final contract not found" });
+    }
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+    if (fc.status === "CANCELED") {
+      return res.status(400).json({ success: false, message: "Final contract already canceled" });
+    }
+    fc.status = "CANCELED";
+    await fc.save();
+    return res.status(200).json({ success: true, message: "Final contract canceled successfully", data: formatFinalContract(fc) });
+  } catch (err) {
+    console.error("cancelFinalContract error:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
 export default {
   createFromContract,
   getFinalContractById,
@@ -574,4 +698,6 @@ export default {
   deleteFinalContractById,
   deleteFileFromFinalContract,
   assignTenantToFinalContract,
+  createForCoTenant,
+  cancelFinalContract,
 };

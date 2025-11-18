@@ -12,7 +12,8 @@ const config = {
   key2: "trMrHtvjo6myautxDUiAcYsVtaeQ8nhf",
   endpoint: "https://sb-openapi.zalopay.vn/v2/create",
   queryEndpoint: "https://sb-openapi.zalopay.vn/v2/query",
-  callback_url: "http://localhost:3000/api/payment/zalopay/callback", // Cập nhật URL callback thực tế
+  // Sử dụng env variable cho callback URL - có thể dùng ngrok URL khi test
+  callback_url: process.env.ZALOPAY_CALLBACK_URL || "http://localhost:3000/api/payment/zalopay/callback",
 };
 
 // ==============================
@@ -20,22 +21,59 @@ const config = {
 // ==============================
 export const createZaloOrder = async (req, res) => {
   try {
-    const { billId } = req.body;
+    const { billId, returnUrl } = req.body;
     if (!billId) return res.status(400).json({ message: "Missing billId" });
 
+    // Lấy bill và populate contract với roomId và tenantId (nếu có)
     const bill = await Bill.findById(billId).populate({
       path: "contractId",
       populate: [
         { path: "tenantId", select: "fullName email phone" },
         { path: "roomId", select: "roomNumber" },
       ],
-    });
+    }).lean(); // Sử dụng lean() để lấy plain object, giữ nguyên tenantSnapshot
 
-    if (!bill || !bill.contractId || !bill.contractId.tenantId) {
-      console.error("Missing tenant data for bill:", billId);
+    if (!bill || !bill.contractId) {
+      console.error("Missing contract data for bill:", billId);
       return res
         .status(400)
-        .json({ message: "Hợp đồng hoặc người thuê không tồn tại" });
+        .json({ message: "Hợp đồng không tồn tại" });
+    }
+
+    // Debug log
+    console.log("Bill contractId:", bill.contractId._id);
+    console.log("Has tenantId:", !!bill.contractId.tenantId);
+    console.log("Has tenantSnapshot:", !!bill.contractId.tenantSnapshot);
+    console.log("tenantSnapshot data:", bill.contractId.tenantSnapshot);
+
+    // Lấy thông tin tenant từ tenantId hoặc tenantSnapshot
+    let tenantInfo = null;
+    
+    // Ưu tiên lấy từ tenantId nếu có
+    if (bill.contractId.tenantId) {
+      tenantInfo = {
+        fullName: bill.contractId.tenantId.fullName || "Khách thuê",
+        email: bill.contractId.tenantId.email || "guest@example.com",
+        phone: bill.contractId.tenantId.phone || "0000000000",
+      };
+      console.log("✅ Using tenantId:", tenantInfo);
+    } 
+    // Nếu không có tenantId, lấy từ tenantSnapshot
+    else if (bill.contractId.tenantSnapshot) {
+      tenantInfo = {
+        fullName: bill.contractId.tenantSnapshot.fullName || "Khách thuê",
+        email: bill.contractId.tenantSnapshot.email || "guest@example.com",
+        phone: bill.contractId.tenantSnapshot.phone || "0000000000",
+      };
+      console.log("✅ Using tenantSnapshot:", tenantInfo);
+    }
+
+    if (!tenantInfo) {
+      console.error("❌ Missing tenant info for bill:", billId);
+      console.error("Contract data:", JSON.stringify(bill.contractId, null, 2));
+      return res
+        .status(400)
+        .json({ message: "Không tìm thấy thông tin người thuê" });
     }
 
     // Kiểm tra nếu bill đã thanh toán rồi
@@ -58,21 +96,30 @@ export const createZaloOrder = async (req, res) => {
           .status(400)
           .json({ message: "Hóa đơn này đã thanh toán thành công" });
       } else if (existingPayment.status === "PENDING") {
-        // Nếu đang pending thì trả lại payment cũ
+        // Nếu đang pending thì trả lại payment cũ với payUrl
+        const metadata = existingPayment.metadata || {};
+        const zaloResponse = metadata.zaloResponse || metadata.zaloData || {};
+        const payUrl = zaloResponse.order_url || zaloResponse.orderurl;
+        
+        console.log("⚠️ Found existing PENDING payment");
+        console.log("📦 Existing payment metadata:", metadata);
+        console.log("🔗 Extracted payUrl:", payUrl);
+        
         return res.status(200).json({
           message: "Đang có giao dịch ZaloPay đang chờ xử lý",
-          zaloData:
-            existingPayment.metadata?.zaloData || existingPayment.metadata,
+          zaloData: zaloResponse,
+          payUrl: payUrl,
           paymentId: existingPayment._id,
+          transactionId: existingPayment.transactionId,
           status: "PENDING",
         });
       }
     }
 
     const transID = Math.floor(Math.random() * 1000000);
-    const returnUrl = process.env.ZALOPAY_RETURN_URL || "http://localhost:3000/api/payment/zalopay/return";
+    const zaloReturnUrl = process.env.ZALOPAY_RETURN_URL || "http://localhost:3000/api/payment/zalopay/return";
     const embed_data = {
-      redirecturl: returnUrl,
+      redirecturl: zaloReturnUrl,
       billId,
     };
 
@@ -89,12 +136,12 @@ export const createZaloOrder = async (req, res) => {
     const order = {
       app_id: config.app_id,
       app_trans_id: `${moment().format("YYMMDD")}_${transID}`,
-      app_user: bill.contractId.tenantId.fullName || "anonymous",
+      app_user: tenantInfo.fullName || "anonymous",
       app_time: Date.now(),
       item: JSON.stringify(items),
       embed_data: JSON.stringify(embed_data),
       amount: Math.round(Number(bill.amountDue)),
-      description: `Thanh toán hợp đồng ${bill.contractId._id}`,
+      description: `Thanh toán phòng ${bill.contractId.roomId?.roomNumber || 'N/A'} - ${tenantInfo.fullName}`,
       bank_code: "",
       callback_url: config.callback_url,
     };
@@ -116,9 +163,23 @@ export const createZaloOrder = async (req, res) => {
 
     order.mac = CryptoJS.HmacSHA256(data, config.key1).toString();
 
+    console.log("📤 Sending ZaloPay order:", JSON.stringify(order, null, 2));
+    
     const zaloRes = await axios.post(config.endpoint, order);
+    
+    console.log("📥 ZaloPay API Response:", JSON.stringify(zaloRes.data, null, 2));
 
-    // Lưu Payment trạng thái PENDING
+    // Kiểm tra response từ ZaloPay
+    if (zaloRes.data.return_code !== 1) {
+      console.error("❌ ZaloPay error:", zaloRes.data);
+      return res.status(400).json({
+        success: false,
+        message: zaloRes.data.return_message || "ZaloPay tạo order thất bại",
+        error: zaloRes.data,
+      });
+    }
+
+    // Lưu Payment trạng thái PENDING với returnUrl
     await Payment.create({
       billId,
       provider: "ZALOPAY",
@@ -126,15 +187,35 @@ export const createZaloOrder = async (req, res) => {
       amount: mongoose.Types.Decimal128.fromString(Math.round(Number(bill.amountDue)).toFixed(2)),
       status: "PENDING",
       method: "REDIRECT",
-      metadata: { createdFrom: "createZaloOrder", zaloResponse: zaloRes.data },
+      metadata: { 
+        createdFrom: "createZaloOrder", 
+        zaloResponse: zaloRes.data,
+        returnUrl: returnUrl || null
+      },
     });
 
-    return res.status(200).json({
+    const payUrl = zaloRes.data?.order_url || zaloRes.data?.orderurl;
+    
+    if (!payUrl) {
+      console.error("❌ No payUrl in ZaloPay response:", zaloRes.data);
+      return res.status(500).json({
+        success: false,
+        message: "Không nhận được link thanh toán từ ZaloPay",
+        zaloData: zaloRes.data,
+      });
+    }
+
+    const responseData = {
       success: true,
       zaloData: zaloRes.data,
-      payUrl: zaloRes.data?.order_url || zaloRes.data?.orderurl,
+      payUrl: payUrl,
+      order_url: payUrl, // Thêm field này để frontend dễ parse
       transactionId: order.app_trans_id,
-    });
+    };
+    
+    console.log("✅ Sending to frontend:", JSON.stringify(responseData, null, 2));
+
+    return res.status(200).json(responseData);
   } catch (error) {
     console.error(
       "ZaloPay create order error:",
@@ -153,11 +234,14 @@ export const createZaloOrder = async (req, res) => {
 export const zaloCallback = async (req, res) => {
   let result = {};
   try {
+    console.log("🔔 ZaloPay Callback received:", new Date().toISOString());
+    
     const dataStr = req.body.data;
     const reqMac = req.body.mac;
     const mac = CryptoJS.HmacSHA256(dataStr, config.key2).toString();
 
     if (reqMac !== mac) {
+      console.log("❌ ZaloPay callback: Invalid MAC");
       result.return_code = -1;
       result.return_message = "mac not equal";
       return res.json(result);
@@ -165,6 +249,14 @@ export const zaloCallback = async (req, res) => {
 
     const dataJson = JSON.parse(dataStr);
     const { app_trans_id, zp_trans_id, amount, return_code } = dataJson;
+    
+    console.log("📦 ZaloPay callback data:", {
+      app_trans_id,
+      zp_trans_id,
+      amount,
+      return_code,
+      status: return_code === 1 ? "SUCCESS" : "FAILED"
+    });
 
     // Tìm payment theo transactionId
     let payment = await Payment.findOne({ provider: "ZALOPAY", transactionId: app_trans_id });
@@ -184,13 +276,17 @@ export const zaloCallback = async (req, res) => {
 
     // ZaloPay return_code = 1 là thành công
     if (return_code === 1 && Number(amount) > 0) {
+      console.log("✅ ZaloPay payment SUCCESS - Processing...");
       // Apply payment using shared helper (atomic) - tự động cập nhật bill status
       try {
-        await applyPaymentToBill(payment, dataJson);
+        // Lưu returnUrl trước khi apply
+        const savedReturnUrl = payment.metadata?.returnUrl;
+        await applyPaymentToBill(payment, { ...dataJson, returnUrl: savedReturnUrl });
+        console.log("✅ Payment applied successfully to bill");
         result.return_code = 1;
         result.return_message = "Confirm Success";
       } catch (e) {
-        console.error("applyPaymentToBill error (ZaloPay callback):", e);
+        console.error("❌ applyPaymentToBill error (ZaloPay callback):", e);
         result.return_code = 0;
         result.return_message = "Internal error";
       }
@@ -304,47 +400,80 @@ export const checkPaymentStatus = async (req, res) => {
 
 export const zaloReturn = async (req, res) => {
   try {
+    console.log("🔙 ZaloPay Return received:", req.query);
     const { apptransid, status } = req.query;
 
     // Tìm payment theo transactionId
     const payment = await Payment.findOne({ provider: "ZALOPAY", transactionId: apptransid });
     if (!payment) {
+      console.log("❌ Payment not found:", apptransid);
       return res.status(404).send("Payment record not found");
     }
 
-    if (payment.status === "SUCCESS") {
-      // Đã xử lý rồi, redirect về frontend
-      const successUrl = process.env.FRONTEND_SUCCESS_URL || "http://localhost:5173/payment-success";
-      const qs = new URLSearchParams({
-        orderId: String(apptransid || ""),
-        amount: String(payment.amount.toString() || ""),
-      }).toString();
-      return res.redirect(`${successUrl}?${qs}`);
-    }
+    console.log("📦 Payment status:", payment.status);
 
-    // Nếu chưa success, thử apply payment nếu status = success từ query (fallback khi test local)
+    // Lưu return data vào metadata (không apply payment ở đây)
+    if (!payment.metadata) payment.metadata = {};
+    payment.metadata.returnData = req.query;
+    await payment.save();
+
+    // Redirect về frontend với thông báo thành công
     if (status === "1" || status === "success") {
-      try {
-        await applyPaymentToBill(payment, req.query);
-        const successUrl = process.env.FRONTEND_SUCCESS_URL || "http://localhost:5173/payment-success";
-        const qs = new URLSearchParams({
-          orderId: String(apptransid || ""),
-          amount: String(payment.amount.toString() || ""),
-        }).toString();
-        return res.redirect(`${successUrl}?${qs}`);
-      } catch (e) {
-        console.error("applyPaymentToBill error (ZaloPay return):", e);
-        return res.status(500).send("Server error while applying payment");
-      }
+      console.log("✅ Payment success - redirecting to frontend");
+      
+      // Lấy returnUrl từ payment metadata (đã lưu khi tạo payment)
+      const savedReturnUrl = payment.metadata?.returnUrl;
+      console.log("💾 Saved returnUrl:", savedReturnUrl);
+      
+      const frontendReturnUrl = savedReturnUrl || `${process.env.FRONTEND_URL || "http://localhost:5173"}/admin/checkins`;
+      const redirectUrl = `${frontendReturnUrl}?payment=success&provider=zalopay&transactionId=${apptransid}`;
+      console.log("🔗 Redirecting to:", redirectUrl);
+      
+      return res.redirect(redirectUrl);
     }
 
     // Failed
+    console.log("❌ Payment failed or cancelled");
     payment.status = "FAILED";
-    payment.metadata = { ...payment.metadata, returnData: req.query };
     await payment.save();
-    return res.send("Payment failed or cancelled");
+    return res.send(`
+      <html>
+        <head>
+          <title>Thanh toán thất bại</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              height: 100vh;
+              margin: 0;
+              background: #f5f5f5;
+            }
+            .container {
+              text-align: center;
+              background: white;
+              padding: 40px;
+              border-radius: 20px;
+              box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            }
+            h2 { color: #ff4d4f; }
+            p { color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h2>❌ Thanh toán thất bại</h2>
+            <p>Giao dịch đã bị hủy hoặc thất bại</p>
+            <p style="margin-top: 20px;">
+              <a href="javascript:window.close()">Đóng cửa sổ này</a>
+            </p>
+          </div>
+        </body>
+      </html>
+    `);
   } catch (error) {
-    console.error("ZaloPay return error:", error);
+    console.error("❌ ZaloPay return error:", error);
     return res.status(500).send("ZaloPay return failed.");
   }
 };

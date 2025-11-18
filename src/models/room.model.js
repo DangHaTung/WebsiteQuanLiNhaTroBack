@@ -44,11 +44,6 @@ const roomSchema = new Schema(
             type: Number,
             required: false,
         },
-        district: {
-            type: String,
-            required: false,
-            trim: true,
-        },
         status: {
             type: String,
             enum: ROOM_STATUS,

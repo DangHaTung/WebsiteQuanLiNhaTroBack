@@ -37,7 +37,7 @@ const finalContractSchema = new Schema(
 
     status: {
       type: String,
-      enum: ["DRAFT", "WAITING_SIGN", "SIGNED"],
+      enum: ["DRAFT", "WAITING_SIGN", "SIGNED", "CANCELED"],
       default: "DRAFT",
     },
 
@@ -49,6 +49,10 @@ const finalContractSchema = new Schema(
     tenantSignedAt: { type: Date },
     ownerApprovedAt: { type: Date },
     finalizedAt: { type: Date },
+
+    // Co-tenant support - cho phép tạo FinalContract cho người ở cùng
+    linkedContractId: { type: Schema.Types.ObjectId, ref: "Contract" }, // Link đến Contract chính
+    isCoTenant: { type: Boolean, default: false }, // Flag để biết đây là FinalContract cho người ở cùng
   },
   { timestamps: true, versionKey: false }
 );

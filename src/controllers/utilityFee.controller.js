@@ -74,13 +74,35 @@ export const createOrUpdateUtilityFee = async (req, res) => {
     
     if (fee) {
       // Cập nhật
-      fee.description = description || fee.description;
+      fee.description = description !== undefined ? description : fee.description;
       fee.baseRate = baseRate !== undefined ? baseRate : fee.baseRate;
-      fee.electricityTiers = electricityTiers || fee.electricityTiers;
+      
+      // Fix: Nếu electricityTiers được gửi (kể cả mảng rỗng), cập nhật nó
+      // QUAN TRỌNG: Chỉ cập nhật tiers nếu type là "electricity" và electricityTiers được gửi
+      if (type === "electricity" && electricityTiers !== undefined) {
+        fee.electricityTiers = Array.isArray(electricityTiers) ? electricityTiers : [];
+        console.log(`[createOrUpdateUtilityFee] Updating electricity tiers: ${fee.electricityTiers.length} tiers`);
+      }
+      // Nếu không phải electricity, không động vào electricityTiers (giữ nguyên)
+      
       fee.vatPercent = vatPercent !== undefined ? vatPercent : fee.vatPercent;
       fee.isActive = isActive !== undefined ? isActive : fee.isActive;
       
+      console.log(`[createOrUpdateUtilityFee] Updating ${type}:`, {
+        electricityTiersReceived: electricityTiers,
+        tiersReceivedCount: electricityTiers?.length || 0,
+        electricityTiersBeforeSave: fee.electricityTiers,
+        tiersCountBeforeSave: fee.electricityTiers?.length || 0,
+        type: type,
+      });
+      
       await fee.save();
+      
+      // Verify sau khi save
+      const saved = await UtilityFee.findById(fee._id);
+      console.log(`[createOrUpdateUtilityFee] After save - tiers count: ${saved?.electricityTiers?.length || 0}`, {
+        tiers: saved?.electricityTiers,
+      });
       
       return res.status(200).json({
         success: true,

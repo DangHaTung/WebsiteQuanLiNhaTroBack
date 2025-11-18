@@ -14,4 +14,5 @@ export const roomParamsSchema = Joi.object({
 export const calculateRoomFeesSchema = Joi.object({
   kwh: Joi.number().min(0).default(0),
   occupantCount: Joi.number().integer().min(0).default(0),
+  vehicleCount: Joi.number().integer().min(0).default(0),
 });
