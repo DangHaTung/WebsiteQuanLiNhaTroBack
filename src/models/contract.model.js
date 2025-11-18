@@ -57,6 +57,9 @@ const contractSchema = new Schema(
       method: { type: String }, // BANK/CASH/OTHER
       transactionId: { type: String },
       note: { type: String },
+      damageAmount: { type: mongoose.Schema.Types.Decimal128 }, // Thiệt hại
+      damageNote: { type: String }, // Ghi chú thiệt hại
+      finalMonthServiceFee: { type: mongoose.Schema.Types.Decimal128 }, // Dịch vụ tháng cuối
     },
     // Người ở cùng (co-tenants) - cho phép nhiều người ở chung phòng
     coTenants: [

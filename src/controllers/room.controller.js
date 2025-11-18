@@ -23,7 +23,6 @@ const formatRoom = (room) => {
     pricePerMonth: convertDecimal128(obj.pricePerMonth),
     areaM2: obj.areaM2,
     floor: obj.floor,
-    district: obj.district,
     status: obj.status,
     image: obj.coverImageUrl || (obj.images?.[0]?.url || ""),
     images: Array.isArray(obj.images) ? obj.images.map(i => i.url || "") : [],
@@ -121,10 +120,30 @@ export const getRoomById = async (req, res) => {
             success: false 
         });
 
+        const formattedRoom = formatRoom(room);
+
+        // Lấy utilities (nội thất) của phòng - ẩn các item bị hỏng ở client
+        const Util = (await import("../models/util.model.js")).default;
+        const utils = await Util.find({ room: id, isActive: true, condition: { $ne: "broken" } })
+            .sort({ createdAt: -1 });
+        
+        // Format utilities
+        const formatUtil = (util) => {
+            const obj = util.toObject ? util.toObject() : util;
+            return {
+                _id: obj._id,
+                name: obj.name,
+                condition: obj.condition,
+                description: obj.description || "",
+            };
+        };
+
+        formattedRoom.utilities = utils.map(formatUtil);
+
         res.status(200).json({
             message: "Lấy thông tin phòng thành công",
             success: true,
-            data: formatRoom(room),
+            data: formattedRoom,
         });
     } catch (err) {
         res.status(500).json({ 
@@ -146,7 +165,6 @@ export const createRoom = async (req, res) => {
             pricePerMonth,
             areaM2,
             floor,
-            district,
             status,
             currentContractSummary,
         } = req.body;
@@ -197,7 +215,6 @@ export const createRoom = async (req, res) => {
             pricePerMonth,
             areaM2,
             floor,
-            district,
             status,
             currentContractSummary,
             images: [...bodyImages, ...uploadedImages],

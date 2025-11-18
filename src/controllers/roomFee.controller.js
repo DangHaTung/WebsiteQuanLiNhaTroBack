@@ -62,13 +62,23 @@ export const getRoomFees = async (req, res) => {
 
 // Calculate fees for a room
 // Electricity: tiered kWh + VAT
-// Parking: baseRate * occupantCount
-// Water/Internet: flat baseRate per room
+// Parking: baseRate * vehicleCount
+// Water: baseRate * occupantCount (tính theo số người)
+// Internet: flat baseRate per room
 // Cleaning: baseRate * occupantCount
 export const calculateRoomFees = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const { kwh = 0, occupantCount = 0 } = req.body; // water/internet/cleaning are flat
+    
+    // Debug: Log raw req.body trước khi destructure
+    console.log(`[calculateRoomFees] Raw req.body:`, JSON.stringify(req.body));
+    console.log(`[calculateRoomFees] req.body keys:`, Object.keys(req.body || {}));
+    console.log(`[calculateRoomFees] req.body.vehicleCount:`, req.body?.vehicleCount, typeof req.body?.vehicleCount);
+    
+    const { kwh = 0, occupantCount = 0, vehicleCount = 0 } = req.body; // water/internet/cleaning are flat
+    
+    // Debug: Log sau khi destructure
+    console.log(`[calculateRoomFees] After destructure: kwh=${kwh}, occupantCount=${occupantCount}, vehicleCount=${vehicleCount}`);
 
     if (!mongoose.isValidObjectId(roomId)) {
       return res.status(400).json({ success: false, message: "Room ID không hợp lệ" });
@@ -90,20 +100,53 @@ export const calculateRoomFees = async (req, res) => {
     }
 
     // Electricity
-    if (rf.appliedTypes.includes("electricity")) {
+    if (rf.appliedTypes.includes("electricity") && kwh > 0) {
       const activeEl = await UtilityFee.findOne({ type: "electricity", isActive: true });
-      const tiers = activeEl?.electricityTiers?.length ? activeEl.electricityTiers : DEFAULT_ELECTRICITY_TIERS;
+      
+      // Debug: Kiểm tra tiers từ database
+      console.log(`[calculateRoomFees] Found activeEl:`, activeEl ? {
+        _id: activeEl._id,
+        type: activeEl.type,
+        electricityTiersCount: activeEl.electricityTiers?.length || 0,
+        electricityTiers: activeEl.electricityTiers,
+        vatPercent: activeEl.vatPercent,
+      } : 'null');
+      
+      // Sửa logic: Chỉ dùng DEFAULT nếu không có tiers trong DB hoặc tiers là mảng rỗng
+      let tiers;
+      if (activeEl?.electricityTiers && Array.isArray(activeEl.electricityTiers) && activeEl.electricityTiers.length > 0) {
+        tiers = activeEl.electricityTiers;
+        console.log(`[calculateRoomFees] Using tiers from DB: ${tiers.length} tiers`);
+      } else {
+        tiers = DEFAULT_ELECTRICITY_TIERS;
+        console.log(`[calculateRoomFees] Using DEFAULT_ELECTRICITY_TIERS: ${tiers.length} tiers`);
+      }
+      
       const vatPercent = typeof activeEl?.vatPercent === "number" ? activeEl.vatPercent : 8;
+      
+      // Debug logging
+      console.log(`[calculateRoomFees] Electricity calculation: kwh=${kwh}, tiers count=${tiers?.length || 0}, vatPercent=${vatPercent}`);
+      if (tiers && tiers.length > 0) {
+        console.log(`[calculateRoomFees] Tiers:`, JSON.stringify(tiers, null, 2));
+      }
+      
       const resEl = calculateElectricityCost(kwh, tiers, vatPercent);
-      breakdown.push({ type: "electricity", kwh, tiers, subtotal: resEl.subtotal, vat: resEl.vat, total: resEl.total });
+      
+      console.log(`[calculateRoomFees] Electricity result: subtotal=${resEl.subtotal}, vat=${resEl.vat}, total=${resEl.total}`);
+      if (resEl.items && resEl.items.length > 0) {
+        console.log(`[calculateRoomFees] Electricity items:`, JSON.stringify(resEl.items, null, 2));
+      }
+      
+      breakdown.push({ type: "electricity", kwh, tiers: resEl.items, subtotal: resEl.subtotal, vat: resEl.vat, total: resEl.total });
       total += resEl.total;
     }
 
-    // Water flat
-    if (rf.appliedTypes.includes("water")) {
+    // Water per occupant
+    if (rf.appliedTypes.includes("water") && occupantCount > 0) {
       const active = await UtilityFee.findOne({ type: "water", isActive: true });
-      const amount = active?.baseRate || 0;
-      breakdown.push({ type: "water", baseRate: amount, total: amount });
+      const rate = active?.baseRate || 0;
+      const amount = rate * (Number(occupantCount) || 0);
+      breakdown.push({ type: "water", baseRate: rate, occupantCount: Number(occupantCount) || 0, total: amount });
       total += amount;
     }
 
@@ -125,13 +168,30 @@ export const calculateRoomFees = async (req, res) => {
       total += amount;
     }
 
-    // Parking per occupant
+    // Parking per vehicle (dùng vehicleCount thay vì occupantCount)
+    // Debug: Kiểm tra parking
+    console.log(`[calculateRoomFees] Parking check: appliedTypes includes parking=${rf.appliedTypes.includes("parking")}, vehicleCount from req.body=${vehicleCount}, typeof=${typeof vehicleCount}`);
+    
     if (rf.appliedTypes.includes("parking")) {
       const active = await UtilityFee.findOne({ type: "parking", isActive: true });
       const rate = active?.baseRate || 0;
-      const amount = rate * (Number(occupantCount) || 0);
-      breakdown.push({ type: "parking", baseRate: rate, occupantCount: Number(occupantCount) || 0, total: amount });
-      total += amount;
+      const vehicleCountNum = Number(vehicleCount) || 0;
+      
+      console.log(`[calculateRoomFees] Parking: rate=${rate}, vehicleCountNum=${vehicleCountNum}, active=${active ? 'found' : 'not found'}, req.body=`, JSON.stringify(req.body));
+      
+      // Tính parking - luôn thêm vào breakdown để hiển thị, kể cả khi vehicleCount = 0
+      if (rate > 0) {
+        const amount = rate * vehicleCountNum;
+        breakdown.push({ type: "parking", baseRate: rate, vehicleCount: vehicleCountNum, total: amount });
+        total += amount;
+        console.log(`[calculateRoomFees] Parking added to breakdown: vehicleCount=${vehicleCountNum}, rate=${rate}, amount=${amount}`);
+      } else {
+        // Vẫn thêm vào breakdown với amount = 0 để hiển thị
+        breakdown.push({ type: "parking", baseRate: 0, vehicleCount: vehicleCountNum, total: 0 });
+        console.log(`[calculateRoomFees] Parking rate is 0, but still added to breakdown with vehicleCount=${vehicleCountNum}`);
+      }
+    } else {
+      console.log(`[calculateRoomFees] Parking not in appliedTypes: ${rf.appliedTypes.join(', ')}`);
     }
 
     res.status(200).json({ success: true, message: "Tính phí phòng thành công", data: { roomId, breakdown, total } });

@@ -52,13 +52,6 @@ export const createRoomSchema = Joi.object({
       'number.max': 'Floor không được vượt quá 50',
     }),
 
-  district: Joi.string()
-    .trim()
-    .max(100)
-    .optional()
-    .messages({
-      'string.max': 'District không được vượt quá 100 ký tự',
-    }),
 
   status: Joi.string()
     .valid('AVAILABLE', 'OCCUPIED', 'MAINTENANCE')
@@ -174,13 +167,6 @@ export const updateRoomSchema = Joi.object({
       'number.max': 'Floor không được vượt quá 50',
     }),
 
-  district: Joi.string()
-    .trim()
-    .max(100)
-    .optional()
-    .messages({
-      'string.max': 'District không được vượt quá 100 ký tự',
-    }),
 
   status: Joi.string()
     .valid('AVAILABLE', 'OCCUPIED', 'MAINTENANCE')

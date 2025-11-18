@@ -8,6 +8,7 @@ import {
   assignTenantToFinalContract,
   deleteFileFromFinalContract,
   createForCoTenant,
+  cancelFinalContract,
 } from "../controllers/finalContract.controller.js";
 import { finalContractParamsSchema, deleteFileParamsSchema, assignTenantSchema } from "../validations/finalContract.validation.js";
 import { validateParams, validateBody, validatePagination } from "../middleware/validation.middleware.js";
@@ -100,6 +101,15 @@ router.post(
   authenticateToken,
   authorize('ADMIN'),
   asyncHandler(createForCoTenant)
+);
+
+// Cancel FinalContract (Admin only)
+router.put(
+  "/final-contracts/:id/cancel",
+  authenticateToken,
+  authorize('ADMIN'),
+  validateParams(finalContractParamsSchema),
+  asyncHandler(cancelFinalContract)
 );
 
 export default router;

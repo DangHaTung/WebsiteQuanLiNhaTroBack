@@ -37,7 +37,7 @@ const finalContractSchema = new Schema(
 
     status: {
       type: String,
-      enum: ["DRAFT", "WAITING_SIGN", "SIGNED"],
+      enum: ["DRAFT", "WAITING_SIGN", "SIGNED", "CANCELED"],
       default: "DRAFT",
     },
 

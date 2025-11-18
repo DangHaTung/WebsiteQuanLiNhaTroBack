@@ -451,7 +451,7 @@ export const getDraftBills = async (req, res) => {
 export const publishDraftBill = async (req, res) => {
   try {
     const { id } = req.params;
-    const { electricityKwh, waterM3 = 0, occupantCount = 1 } = req.body;
+    const { electricityKwh, waterM3 = 0, occupantCount = 1, vehicleCount = 0 } = req.body;
 
     const bill = await Bill.findById(id).populate("contractId");
     if (!bill) {
@@ -479,6 +479,7 @@ export const publishDraftBill = async (req, res) => {
       electricityKwh: Number(electricityKwh),
       waterM3: Number(waterM3),
       occupantCount: Number(occupantCount),
+      vehicleCount: Number(vehicleCount),
     });
 
     // Cập nhật bill
@@ -523,7 +524,7 @@ export const publishBatchDraftBills = async (req, res) => {
 
     for (const item of bills) {
       try {
-        const { billId, electricityKwh, waterM3 = 0, occupantCount = 1 } = item;
+        const { billId, electricityKwh, waterM3 = 0, occupantCount = 1, vehicleCount = 0 } = item;
 
         const bill = await Bill.findById(billId).populate("contractId");
         if (!bill || bill.status !== "DRAFT") {
@@ -544,6 +545,7 @@ export const publishBatchDraftBills = async (req, res) => {
           electricityKwh: Number(electricityKwh),
           waterM3: Number(waterM3),
           occupantCount: Number(occupantCount),
+          vehicleCount: Number(vehicleCount),
         });
 
         // Cập nhật
@@ -827,6 +829,42 @@ export const confirmCashPayment = async (req, res) => {
       success: false,
       message: "Lỗi khi xác nhận thanh toán",
       error: err.message,
+    });
+  }
+};
+
+// Tính toán phí dịch vụ tháng cuối (cho hoàn cọc)
+export const calculateMonthlyFees = async (req, res) => {
+  try {
+    const { roomId, electricityKwh = 0, waterM3 = 0, occupantCount = 1, excludeRent = false } = req.body;
+
+    if (!roomId) {
+      return res.status(400).json({
+        success: false,
+        message: "roomId is required",
+      });
+    }
+
+    const { calculateRoomMonthlyFees } = await import("../services/billing/monthlyBill.service.js");
+    const calculation = await calculateRoomMonthlyFees({
+      roomId,
+      electricityKwh: Number(electricityKwh),
+      waterM3: Number(waterM3),
+      occupantCount: Number(occupantCount),
+      excludeRent: Boolean(excludeRent),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Tính toán phí dịch vụ thành công",
+      data: calculation,
+    });
+  } catch (error) {
+    console.error("calculateMonthlyFees error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi tính toán phí dịch vụ",
+      error: error.message,
     });
   }
 };

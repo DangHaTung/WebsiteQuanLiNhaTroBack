@@ -661,6 +661,30 @@ export const createForCoTenant = async (req, res) => {
   }
 };
 
+// Cancel FinalContract (soft delete)
+export const cancelFinalContract = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const fc = await FinalContract.findById(id);
+    if (!fc) {
+      return res.status(404).json({ success: false, message: "Final contract not found" });
+    }
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+    if (fc.status === "CANCELED") {
+      return res.status(400).json({ success: false, message: "Final contract already canceled" });
+    }
+    fc.status = "CANCELED";
+    await fc.save();
+    return res.status(200).json({ success: true, message: "Final contract canceled successfully", data: formatFinalContract(fc) });
+  } catch (err) {
+    console.error("cancelFinalContract error:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
 export default {
   createFromContract,
   getFinalContractById,
@@ -675,4 +699,5 @@ export default {
   deleteFileFromFinalContract,
   assignTenantToFinalContract,
   createForCoTenant,
+  cancelFinalContract,
 };

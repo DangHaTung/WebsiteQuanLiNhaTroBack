@@ -14,7 +14,8 @@ import {
 import { 
   createContractSchema, 
   updateContractSchema, 
-  contractParamsSchema 
+  contractParamsSchema,
+  refundDepositSchema
 } from "../validations/contract.validation.js";
 import { 
   validateBody, 
@@ -36,7 +37,7 @@ router.get("/contracts/:id/print-data", authenticateToken, authorize('ADMIN'), v
 router.put("/contracts/:id", authenticateToken, authorize('ADMIN'), validateParams(contractParamsSchema), validateBody(updateContractSchema), asyncHandler(updateContract));
 router.delete("/contracts/:id", authenticateToken, authorize('ADMIN'), validateParams(contractParamsSchema), asyncHandler(deleteContract));
 // Hoàn cọc khi hợp đồng ENDED
-router.post("/contracts/:id/refund-deposit", authenticateToken, authorize('ADMIN'), validateParams(contractParamsSchema), asyncHandler(refundDeposit));
+router.post("/contracts/:id/refund-deposit", authenticateToken, authorize('ADMIN'), validateParams(contractParamsSchema), validateBody(refundDepositSchema), asyncHandler(refundDeposit));
 // Link co-tenant vào contract
 router.post("/contracts/:id/link-cotenant", authenticateToken, authorize('ADMIN'), validateParams(contractParamsSchema), asyncHandler(linkCoTenantToContract));
 // Add co-tenant (không cần thanh toán) - TEMP: Bỏ auth để test

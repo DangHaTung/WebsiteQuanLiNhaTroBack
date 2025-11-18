@@ -1,5 +1,5 @@
 import express from "express";
-import { getAllBills, getBillById, createBill, updateBill, getMyBills, confirmCashReceipt, cancelBill } from "../controllers/bill.controller.js";
+import { getAllBills, getBillById, createBill, updateBill, getMyBills, confirmCashReceipt, cancelBill, calculateMonthlyFees } from "../controllers/bill.controller.js";
 import { 
   createBillSchema, 
   updateBillSchema, 
@@ -39,5 +39,7 @@ router.post("/bills/publish-batch", authenticateToken, authorize('ADMIN'), async
 router.post("/bills/:id/confirm-payment", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(confirmCashReceipt));
 // Hủy hóa đơn (cancel) thay cho delete
 router.put("/bills/:id/cancel", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(cancelBill));
+// Tính toán phí dịch vụ (cho hoàn cọc)
+router.post("/bills/calculate-monthly-fees", authenticateToken, authorize('ADMIN'), asyncHandler(calculateMonthlyFees));
 
 export default router;

@@ -220,3 +220,16 @@ export const contractParamsSchema = Joi.object({
       'any.required': 'ID là bắt buộc',
     }),
 });
+
+// Schema cho refund deposit
+export const refundDepositSchema = Joi.object({
+  electricityKwh: Joi.number().min(0).default(0),
+  waterM3: Joi.number().min(0).default(0),
+  occupantCount: Joi.number().integer().min(1).optional(),
+  vehicleCount: Joi.number().integer().min(0).default(0),
+  damageAmount: Joi.number().min(0).default(0),
+  damageNote: Joi.string().max(500).allow('').optional(),
+  method: Joi.string().valid('BANK', 'CASH', 'OTHER').default('BANK'),
+  transactionId: Joi.string().max(200).allow('').optional(),
+  note: Joi.string().max(500).allow('').optional(),
+});
