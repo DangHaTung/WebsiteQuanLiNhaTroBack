@@ -1,9 +1,10 @@
 import express from "express";
-import { getAllBills, getBillById, createBill, updateBill, getMyBills, confirmCashReceipt, cancelBill, calculateMonthlyFees } from "../controllers/bill.controller.js";
+import { getAllBills, getBillById, createBill, updateBill, getMyBills, confirmCashReceipt, cancelBill, calculateMonthlyFees, generatePaymentLink } from "../controllers/bill.controller.js";
 import { 
   createBillSchema, 
   updateBillSchema, 
-  billParamsSchema 
+  billParamsSchema,
+  billIdParamsSchema
 } from "../validations/bill.validation.js";
 import { 
   validateBody, 
@@ -41,5 +42,7 @@ router.post("/bills/:id/confirm-payment", authenticateToken, authorize('ADMIN'),
 router.put("/bills/:id/cancel", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(cancelBill));
 // Tính toán phí dịch vụ (cho hoàn cọc)
 router.post("/bills/calculate-monthly-fees", authenticateToken, authorize('ADMIN'), asyncHandler(calculateMonthlyFees));
+// Generate payment link và gửi email (admin only)
+router.post("/bills/:id/generate-payment-link", authenticateToken, authorize('ADMIN'), validateParams(billIdParamsSchema), asyncHandler(generatePaymentLink));
 
 export default router;

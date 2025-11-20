@@ -129,7 +129,7 @@ export const getMyBills = async (req, res) => {
 // Lấy danh sách hóa đơn (admin)
 export const getAllBills = async (req, res) => {
   try {
-    const { page = 1, limit = 10, status, billType } = req.query;
+    const { page = 1, limit = 10, status, billType, contractId, finalContractId } = req.query;
     const skip = (page - 1) * limit;
 
     // Build filter query
@@ -139,6 +139,12 @@ export const getAllBills = async (req, res) => {
     }
     if (billType && billType !== "ALL") {
       filter.billType = billType;
+    }
+    if (contractId) {
+      filter.contractId = contractId;
+    }
+    if (finalContractId) {
+      filter.finalContractId = finalContractId;
     }
 
     const bills = await Bill.find(filter)
@@ -864,6 +870,195 @@ export const calculateMonthlyFees = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Lỗi khi tính toán phí dịch vụ",
+      error: error.message,
+    });
+  }
+};
+
+// Generate payment link for bill (admin only)
+export const generatePaymentLink = async (req, res) => {
+  try {
+    const billId = req.params.id || req.params.billId; // Support both :id and :billId
+    const { email: emailFromBody } = req.body || {}; // Allow email from request body
+    
+    if (!billId) {
+      return res.status(400).json({
+        success: false,
+        message: "billId is required",
+      });
+    }
+
+    const bill = await Bill.findById(billId).populate({
+      path: "contractId",
+      select: "tenantSnapshot pricingSnapshot roomId", // Include roomId để populate room
+      populate: {
+        path: "roomId",
+        select: "roomNumber", // Populate room để lấy roomNumber
+      },
+    });
+    if (!bill) {
+      return res.status(404).json({
+        success: false,
+        message: "Bill not found",
+      });
+    }
+    
+    console.log("🔍 Bill found:", bill._id);
+    console.log("🔍 Bill contractId:", bill.contractId?._id);
+    console.log("🔍 Bill contractId type:", typeof bill.contractId);
+
+    // Chỉ cho phép generate link cho bill RECEIPT chưa thanh toán
+    if (bill.billType !== "RECEIPT") {
+      return res.status(400).json({
+        success: false,
+        message: "Chỉ có thể tạo link thanh toán cho phiếu thu (RECEIPT)",
+      });
+    }
+
+    if (bill.status === "PAID") {
+      return res.status(400).json({
+        success: false,
+        message: "Bill đã thanh toán rồi",
+      });
+    }
+
+    // Lấy thông tin contract để lấy tenantSnapshot
+    const contract = bill.contractId;
+    if (!contract || !contract.tenantSnapshot) {
+      console.error("❌ Contract không có tenantSnapshot:", {
+        billId,
+        contractId: contract?._id,
+        hasContract: !!contract,
+        hasTenantSnapshot: !!contract?.tenantSnapshot,
+      });
+      return res.status(400).json({
+        success: false,
+        message: "Contract không có thông tin người thuê",
+      });
+    }
+
+    // Debug log để kiểm tra tenantSnapshot
+    console.log("🔍 Contract tenantSnapshot:", JSON.stringify(contract.tenantSnapshot, null, 2));
+    console.log("🔍 Contract tenantSnapshot.email:", contract.tenantSnapshot?.email);
+
+    let tenantEmail = contract.tenantSnapshot?.email;
+    
+    // Nếu không có email trong tenantSnapshot, thử các nguồn khác
+    if (!tenantEmail) {
+      console.warn("⚠️ Contract không có email, thử lấy từ các nguồn khác...");
+      
+      // Ưu tiên 1: Email từ request body (admin nhập)
+      if (emailFromBody) {
+        contract.tenantSnapshot = contract.tenantSnapshot || {};
+        contract.tenantSnapshot.email = emailFromBody;
+        await contract.save();
+        tenantEmail = emailFromBody;
+        console.log("✅ Đã cập nhật email từ request body vào contract");
+      }
+      // Ưu tiên 2: Email từ checkin
+      else {
+        const Checkin = (await import("../models/checkin.model.js")).default;
+        const checkin = await Checkin.findOne({ receiptBillId: billId });
+        console.log("🔍 Checkin found:", checkin ? "Yes" : "No");
+        if (checkin) {
+          console.log("🔍 Checkin tenantSnapshot:", JSON.stringify(checkin.tenantSnapshot, null, 2));
+          console.log("🔍 Checkin tenantSnapshot.email:", checkin.tenantSnapshot?.email);
+        }
+        if (checkin?.tenantSnapshot?.email) {
+          contract.tenantSnapshot = contract.tenantSnapshot || {};
+          contract.tenantSnapshot.email = checkin.tenantSnapshot.email;
+          await contract.save();
+          tenantEmail = checkin.tenantSnapshot.email;
+          console.log("✅ Đã cập nhật email từ checkin vào contract:", tenantEmail);
+        } else {
+          console.warn("⚠️ Checkin cũng không có email");
+        }
+      }
+    } else {
+      console.log("✅ Email từ contract.tenantSnapshot:", tenantEmail);
+    }
+    
+    if (!tenantEmail) {
+      console.error("❌ Contract tenantSnapshot không có email:", {
+        billId,
+        contractId: contract._id,
+        tenantSnapshot: contract.tenantSnapshot,
+        emailFromBody,
+      });
+      return res.status(400).json({
+        success: false,
+        message: "Người thuê chưa có email. Vui lòng nhập email để gửi link thanh toán.",
+        requiresEmail: true, // Flag để frontend biết cần hiển thị modal nhập email
+      });
+    }
+
+    // Generate token (32 bytes hex string)
+    const crypto = await import("crypto");
+    const token = crypto.randomBytes(32).toString("hex");
+    
+    // Token expires in 30 days
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30);
+
+    // Save token to bill
+    bill.paymentToken = token;
+    bill.paymentTokenExpiresAt = expiresAt;
+    await bill.save();
+
+    // Build payment URL
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const paymentUrl = `${frontendUrl}/public/payment/${billId}/${token}`;
+
+    // Send email with payment link
+    try {
+      const { sendPaymentLinkEmail } = await import("../services/email/notification.service.js");
+      const amountNum = convertDecimal128(bill.amountDue) || 0;
+      
+      // Get roomNumber from various sources
+      let roomNumber = "N/A";
+      if (contract.pricingSnapshot?.roomNumber) {
+        roomNumber = contract.pricingSnapshot.roomNumber;
+      } else if (contract.roomId && typeof contract.roomId === 'object' && contract.roomId.roomNumber) {
+        roomNumber = contract.roomId.roomNumber;
+      } else if (typeof contract.roomId === 'string') {
+        // If roomId is just an ID, try to fetch it
+        const Room = (await import("../models/room.model.js")).default;
+        const room = await Room.findById(contract.roomId).select("roomNumber");
+        if (room) roomNumber = room.roomNumber;
+      }
+      
+      await sendPaymentLinkEmail({
+        to: tenantEmail,
+        fullName: contract.tenantSnapshot?.fullName || "Khách hàng",
+        paymentUrl,
+        billId: bill._id.toString(),
+        amount: amountNum,
+        roomNumber,
+        expiresAt,
+      });
+      console.log("✅ Email đã được gửi đến:", tenantEmail);
+    } catch (emailError) {
+      console.error("❌ Lỗi khi gửi email:", emailError);
+      // Vẫn trả về success vì link đã được tạo, chỉ là email không gửi được
+      // Có thể gửi lại email sau
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã tạo link thanh toán và gửi email thành công",
+      data: {
+        paymentUrl,
+        token,
+        expiresAt,
+        emailSent: true,
+        recipientEmail: tenantEmail,
+      },
+    });
+  } catch (error) {
+    console.error("generatePaymentLink error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi tạo link thanh toán",
       error: error.message,
     });
   }

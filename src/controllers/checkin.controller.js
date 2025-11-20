@@ -35,6 +35,7 @@ export const createCashCheckin = async (req, res) => {
       // Khách xem phòng trực tiếp (không có tài khoản) → snapshot
       fullName,
       phone,
+      email,
       identityNo,
       address,
       tenantNote,
@@ -65,6 +66,7 @@ export const createCashCheckin = async (req, res) => {
       tenantSnapshot: {
         fullName,
         phone,
+        email,
         identityNo,
         address,
         note: tenantNote,
@@ -152,6 +154,7 @@ export const createOnlineCheckin = async (req, res) => {
       notes,
       fullName,
       phone,
+      email,
       identityNo,
       address,
       tenantNote,
@@ -177,7 +180,7 @@ export const createOnlineCheckin = async (req, res) => {
       durationMonths: Number(duration),
       deposit: toDec(deposit),
       monthlyRent: toDec(monthlyRent),
-      tenantSnapshot: { fullName, phone, identityNo, address, note: tenantNote },
+      tenantSnapshot: { fullName, phone, email, identityNo, address, note: tenantNote },
       notes,
       status: "CREATED",
     });

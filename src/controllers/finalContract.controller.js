@@ -55,9 +55,7 @@ const formatFinalContract = (fc) => {
   if (Array.isArray(obj.images)) {
     obj.images = obj.images.map(addFileLinks);
   }
-  if (Array.isArray(obj.cccdFiles)) {
-    obj.cccdFiles = obj.cccdFiles.map(addFileLinks);
-  }
+  // CCCD files removed - no longer storing CCCD per legal requirements
   return obj;
 };
 
@@ -220,34 +218,6 @@ export const uploadFiles = async (req, res) => {
   }
 };
 
-export const uploadCCCDFile = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const fc = await FinalContract.findById(id);
-    if (!fc) return res.status(404).json({ success: false, message: "Final contract not found" });
-
-    // Only admin/staff can upload CCCD (tenant cannot upload)
-    const isAdmin = req.user?.role === "ADMIN";
-    if (!isAdmin) return res.status(403).json({ success: false, message: "Forbidden" });
-
-    const files = (req.files || []).map((f) => ({
-      url: f.url || f.path,
-      secure_url: f.secure_url || f.path || f.url,
-      public_id: f.public_id || f.filename,
-      resource_type: f.resource_type,
-      format: f.format,
-      bytes: f.bytes || f.size,
-    }));
-
-    fc.cccdFiles = [...(fc.cccdFiles || []), ...files];
-    await fc.save();
-
-    return res.status(200).json({ success: true, message: "Uploaded CCCD files", data: formatFinalContract(fc) });
-  } catch (err) {
-    console.error("uploadCCCDFile error:", err);
-    return res.status(500).json({ success: false, message: "Server error", error: err.message });
-  }
-};
 
 // Stream a file inline (primarily for PDFs uploaded as raw)
 export const viewFileInline = async (req, res) => {
@@ -261,8 +231,8 @@ export const viewFileInline = async (req, res) => {
     const isOwnerTenant = fc.tenantId?.toString() === req.user?._id?.toString();
     if (!isAdmin && !isOwnerTenant) return res.status(403).json({ success: false, message: "Forbidden" });
 
-    // Select correct file array based on type
-    const files = type === "cccd" ? (fc.cccdFiles || []) : (fc.images || []);
+    // Select correct file array based on type (only images/contract files, no CCCD)
+    const files = fc.images || [];
     if (idx < 0 || idx >= files.length) {
       return res.status(404).json({ success: false, message: "File not found" });
     }
@@ -460,7 +430,7 @@ export const deleteFinalContractById = async (req, res) => {
       }
     };
     collectIds(fc.images);
-    collectIds(fc.cccdFiles);
+    // CCCD files removed - no longer storing CCCD per legal requirements
 
     const deletion = { images: { requested: imageIds.length, deleted: 0 }, raws: { requested: rawIds.length, deleted: 0 } };
     // Best-effort delete on Cloudinary
@@ -542,8 +512,12 @@ export const deleteFileFromFinalContract = async (req, res) => {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
-    const isImages = type === "images";
-    const targetArr = isImages ? (fc.images || []) : (fc.cccdFiles || []);
+    // Only allow deleting images/contract files (no CCCD)
+    if (type !== "images") {
+      return res.status(400).json({ success: false, message: "Only contract files can be deleted" });
+    }
+
+    const targetArr = fc.images || [];
     if (idx < 0 || idx >= targetArr.length) {
       return res.status(404).json({ success: false, message: "File not found" });
     }
@@ -565,11 +539,7 @@ export const deleteFileFromFinalContract = async (req, res) => {
     }
 
     // Remove from array and save
-    if (isImages) {
-      fc.images.splice(idx, 1);
-    } else {
-      fc.cccdFiles.splice(idx, 1);
-    }
+    fc.images.splice(idx, 1);
     await fc.save();
 
     return res.status(200).json({ success: true, message: "File deleted", data: { resourceType, publicId, cloudinaryDeleted: deleted } });
@@ -691,7 +661,6 @@ export default {
   getAllFinalContracts,
   getMyFinalContracts,
   uploadFiles,
-  uploadCCCDFile,
   approveOwnerSigned,
   viewFileInline,
   getRemainingAmount,

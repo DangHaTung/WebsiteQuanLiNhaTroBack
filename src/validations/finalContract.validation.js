@@ -60,8 +60,8 @@ export const deleteFileParamsSchema = Joi.object({
       'string.pattern.base': 'ID phải là ObjectId hợp lệ',
       'any.required': 'ID là bắt buộc',
     }),
-  type: Joi.string().valid('images', 'cccdFiles').required().messages({
-    'any.only': 'type phải là một trong: images, cccdFiles',
+  type: Joi.string().valid('images').required().messages({
+    'any.only': 'type phải là images',
     'any.required': 'type là bắt buộc',
   }),
   index: Joi.number().integer().min(0).required().messages({

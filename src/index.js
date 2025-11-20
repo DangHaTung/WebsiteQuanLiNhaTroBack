@@ -23,6 +23,7 @@ import utilityFeeRoute from "./routers/utilityFee.route.js"; // ADMIN utility fe
 import roomFeeRoute from "./routers/roomFee.route.js"; // ADMIN room fee routes
 import { errorHandler, notFound, requestLogger } from "./middleware/error.middleware.js";
 import payRouter from "./routers/payment.route.js";
+import paymentPublicRoute from "./routers/payment.public.route.js"; // PUBLIC payment routes
 import checkinPublicRoute from "./routers/checkin.public.route.js"; // PUBLIC checkin routes
 import finalContractRoute from "./routers/finalContract.route.js"; // PROTECTED final contract routes
 import monthlyBillRoute from "./routers/monthlyBill.route.js"; // Monthly bill generation routes
@@ -48,6 +49,7 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use("/api/payment", payRouter);
+app.use("/api/public", paymentPublicRoute); // PUBLIC payment routes (must be before other routes)
 // Đăng ký route
 // QUAN TRỌNG: Đăng ký PUBLIC routes TRƯỚC các route có middleware
 app.use("/api", roomPublicRoute);      // /rooms/public

@@ -90,7 +90,159 @@ export async function sendBillNotificationToTenant({ tenant, bill, room }) {
   });
 }
 
+/**
+ * Gửi email link thanh toán cho khách hàng
+ */
+export async function sendPaymentLinkEmail({ to, fullName, paymentUrl, billId, amount, roomNumber, expiresAt }) {
+  const subject = `Link thanh toán tiền cọc - Phòng ${roomNumber}`;
+  
+  const expiresDate = new Date(expiresAt).toLocaleDateString('vi-VN', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #1890ff; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }
+        .content { background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-top: none; }
+        .info-box { background-color: white; padding: 15px; margin: 15px 0; border-left: 4px solid #1890ff; }
+        .amount { font-size: 24px; font-weight: bold; color: #1890ff; }
+        .button { display: inline-block; padding: 12px 24px; background-color: #1890ff; color: white; text-decoration: none; border-radius: 5px; margin-top: 15px; }
+        .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #666; }
+        .warning { background-color: #fff3cd; border: 1px solid #ffc107; padding: 10px; margin-top: 15px; border-radius: 5px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h2>💳 Link thanh toán tiền cọc</h2>
+        </div>
+        <div class="content">
+          <p>Xin chào <strong>${fullName}</strong>,</p>
+          
+          <p>Bạn đã được tạo phiếu thu tiền cọc. Vui lòng thanh toán qua link bên dưới:</p>
+          
+          <div class="info-box">
+            <h3>Thông tin thanh toán:</h3>
+            <ul>
+              <li><strong>Mã phiếu thu:</strong> ${billId.substring(0, 8)}...</li>
+              <li><strong>Phòng:</strong> ${roomNumber}</li>
+              <li><strong>Số tiền:</strong> <span class="amount">${(amount || 0).toLocaleString('vi-VN')} VNĐ</span></li>
+              <li><strong>Link có hiệu lực đến:</strong> ${expiresDate}</li>
+            </ul>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${paymentUrl}" class="button">🔗 Thanh toán ngay</a>
+          </div>
+          
+          <div class="warning">
+            <strong>⚠️ Lưu ý:</strong> Link thanh toán này chỉ có hiệu lực trong 30 ngày. Vui lòng thanh toán trước khi hết hạn.
+          </div>
+          
+          <p style="margin-top: 20px;">Nếu bạn không thể click vào nút trên, vui lòng copy link sau vào trình duyệt:</p>
+          <p style="word-break: break-all; color: #1890ff;">${paymentUrl}</p>
+          
+          <p>Trân trọng,<br><strong>Ban quản lý</strong></p>
+        </div>
+        <div class="footer">
+          <p>Email tự động từ hệ thống quản lý phòng trọ</p>
+          <p>Vui lòng không trả lời email này</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+  
+  return await sendEmailNotification({
+    to,
+    subject,
+    html,
+  });
+}
+
+/**
+ * Gửi email thông báo tài khoản đã được tạo sau khi thanh toán thành công
+ */
+export async function sendAccountCreatedEmail({ to, fullName, email, password, loginUrl }) {
+  const subject = `Tài khoản đã được tạo - Hệ thống Quản lý Phòng trọ`;
+  
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #52c41a; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }
+        .content { background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-top: none; }
+        .info-box { background-color: white; padding: 15px; margin: 15px 0; border-left: 4px solid #52c41a; }
+        .credentials { background-color: #f0f9ff; padding: 15px; margin: 15px 0; border-radius: 5px; }
+        .button { display: inline-block; padding: 12px 24px; background-color: #52c41a; color: white; text-decoration: none; border-radius: 5px; margin-top: 15px; }
+        .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #666; }
+        .warning { background-color: #fff3cd; border: 1px solid #ffc107; padding: 10px; margin-top: 15px; border-radius: 5px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h2>✅ Tài khoản đã được tạo thành công</h2>
+        </div>
+        <div class="content">
+          <p>Xin chào <strong>${fullName}</strong>,</p>
+          
+          <p>Chúc mừng! Thanh toán của bạn đã được xác nhận thành công. Tài khoản đã được tự động tạo để bạn có thể đăng nhập và quản lý thông tin.</p>
+          
+          <div class="info-box">
+            <h3>🔐 Thông tin đăng nhập:</h3>
+            <div class="credentials">
+              <p><strong>Email đăng nhập:</strong> ${email}</p>
+              <p><strong>Mật khẩu:</strong> <code style="background: #fff; padding: 4px 8px; border-radius: 3px; font-size: 16px;">${password}</code></p>
+            </div>
+          </div>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${loginUrl}" class="button">🚪 Đăng nhập ngay</a>
+          </div>
+          
+          <div class="warning">
+            <strong>🔒 Bảo mật:</strong> Vui lòng đổi mật khẩu sau khi đăng nhập lần đầu để bảo vệ tài khoản của bạn.
+          </div>
+          
+          <p style="margin-top: 20px;">Nếu bạn không thể click vào nút trên, vui lòng truy cập:</p>
+          <p style="word-break: break-all; color: #52c41a;">${loginUrl}</p>
+          
+          <p>Trân trọng,<br><strong>Ban quản lý</strong></p>
+        </div>
+        <div class="footer">
+          <p>Email tự động từ hệ thống quản lý phòng trọ</p>
+          <p>Vui lòng không trả lời email này</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+  
+  return await sendEmailNotification({
+    to,
+    subject,
+    html,
+  });
+}
+
 export default {
   sendEmailNotification,
   sendBillNotificationToTenant,
+  sendPaymentLinkEmail,
+  sendAccountCreatedEmail,
 };
