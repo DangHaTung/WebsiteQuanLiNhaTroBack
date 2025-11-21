@@ -184,6 +184,28 @@ export const uploadFiles = async (req, res) => {
     const isAdmin = req.user?.role === "ADMIN";
     if (!isAdmin) return res.status(403).json({ success: false, message: "Forbidden" });
 
+    // ✅ VALIDATION: Kiểm tra bill CONTRACT đã thanh toán chưa
+    if (fc.originContractId) {
+      const contractBill = await Bill.findOne({
+        contractId: fc.originContractId,
+        billType: "CONTRACT",
+      });
+      
+      if (!contractBill) {
+        return res.status(400).json({
+          success: false,
+          message: "Không tìm thấy hóa đơn tháng đầu (CONTRACT bill)"
+        });
+      }
+      
+      if (contractBill.status !== "PAID") {
+        return res.status(400).json({
+          success: false,
+          message: "Vui lòng thanh toán hóa đơn tháng đầu trước khi upload hợp đồng"
+        });
+      }
+    }
+
     const files = (req.files || []).map((f) => ({
       // Prefer Cloudinary-provided URLs; do not force image URLs for PDFs
       url: f.url || f.path,
@@ -655,6 +677,152 @@ export const cancelFinalContract = async (req, res) => {
   }
 };
 
+// Extend contract (gia hạn hợp đồng)
+// PUT /api/final-contracts/:id/extend
+export const extendContract = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { extensionMonths } = req.body;
+    
+    // Validate
+    if (!extensionMonths || extensionMonths <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Số tháng gia hạn không hợp lệ (phải > 0)"
+      });
+    }
+    
+    // Tìm FinalContract
+    const finalContract = await FinalContract.findById(id)
+      .populate("tenantId", "fullName email phone")
+      .populate("roomId", "roomNumber");
+      
+    if (!finalContract) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy hợp đồng"
+      });
+    }
+    
+    // Chỉ cho phép gia hạn hợp đồng SIGNED
+    if (finalContract.status !== "SIGNED") {
+      return res.status(400).json({
+        success: false,
+        message: "Chỉ có thể gia hạn hợp đồng đã ký (status = SIGNED)"
+      });
+    }
+    
+    // Tính endDate mới
+    const currentEndDate = new Date(finalContract.endDate);
+    const newEndDate = new Date(currentEndDate);
+    newEndDate.setMonth(newEndDate.getMonth() + parseInt(extensionMonths));
+    
+    // Lưu endDate cũ để log
+    const oldEndDate = finalContract.endDate;
+    
+    // Cập nhật endDate
+    finalContract.endDate = newEndDate;
+    
+    // Lưu lịch sử gia hạn vào metadata
+    if (!finalContract.metadata) finalContract.metadata = {};
+    if (!finalContract.metadata.extensions) finalContract.metadata.extensions = [];
+    
+    finalContract.metadata.extensions.push({
+      extendedAt: new Date(),
+      extendedBy: req.user._id,
+      previousEndDate: oldEndDate,
+      newEndDate: newEndDate,
+      extensionMonths: parseInt(extensionMonths)
+    });
+    
+    await finalContract.save();
+    
+    // Cập nhật Contract gốc (nếu có)
+    if (finalContract.originContractId) {
+      try {
+        await Contract.findByIdAndUpdate(finalContract.originContractId, {
+          endDate: newEndDate
+        });
+        console.log(`✅ Updated origin Contract ${finalContract.originContractId} endDate to ${newEndDate}`);
+      } catch (err) {
+        console.warn("Cannot update origin Contract endDate:", err);
+      }
+    }
+    
+    console.log(`✅ Extended FinalContract ${id}: ${oldEndDate} → ${newEndDate} (+${extensionMonths} months)`);
+    
+    return res.status(200).json({
+      success: true,
+      message: `Gia hạn hợp đồng thành công thêm ${extensionMonths} tháng`,
+      data: {
+        finalContract: formatFinalContract(finalContract),
+        extension: {
+          previousEndDate: oldEndDate,
+          newEndDate: newEndDate,
+          extensionMonths: parseInt(extensionMonths),
+          extendedAt: new Date(),
+          extendedBy: req.user.email || req.user._id
+        }
+      }
+    });
+  } catch (error) {
+    console.error("extendContract error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi gia hạn hợp đồng",
+      error: error.message
+    });
+  }
+};
+
+// Get contracts expiring soon
+// GET /api/final-contracts/expiring-soon?days=30
+export const getExpiringSoonContracts = async (req, res) => {
+  try {
+    const { days = 30 } = req.query;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + parseInt(days));
+    futureDate.setHours(23, 59, 59, 999);
+    
+    const contracts = await FinalContract.find({
+      status: "SIGNED",
+      endDate: {
+        $gte: today,
+        $lte: futureDate
+      }
+    })
+    .populate("tenantId", "fullName email phone")
+    .populate("roomId", "roomNumber pricePerMonth")
+    .populate("originContractId")
+    .sort({ endDate: 1 });
+    
+    const formattedContracts = contracts.map(formatFinalContract);
+    
+    return res.status(200).json({
+      success: true,
+      message: `Tìm thấy ${contracts.length} hợp đồng sắp hết hạn trong ${days} ngày tới`,
+      data: formattedContracts,
+      count: contracts.length,
+      filter: {
+        days: parseInt(days),
+        from: today,
+        to: futureDate
+      }
+    });
+  } catch (error) {
+    console.error("getExpiringSoonContracts error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi lấy danh sách hợp đồng sắp hết hạn",
+      error: error.message
+    });
+  }
+};
+
 export default {
   createFromContract,
   getFinalContractById,
@@ -669,4 +837,6 @@ export default {
   assignTenantToFinalContract,
   createForCoTenant,
   cancelFinalContract,
+  extendContract,
+  getExpiringSoonContracts,
 };

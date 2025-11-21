@@ -257,23 +257,24 @@ export async function createMonthlyBillForRoom({
     }
   }
 
+  // [TEST MODE] Comment out để cho phép tạo lại bill nhiều lần
   // Kiểm tra xem đã có hóa đơn đã phát hành (UNPAID/PAID) cho tháng này chưa
   // Không cho phép tạo lại nếu đã có bill đã phát hành
-  const existingPublishedBill = await Bill.findOne({
-    contractId,
-    status: { $in: ["UNPAID", "PARTIALLY_PAID", "PAID"] },
-    billType: "MONTHLY",
-    billingDate: {
-      $gte: startOfMonth,
-      $lte: endOfMonth,
-    },
-  });
+  // const existingPublishedBill = await Bill.findOne({
+  //   contractId,
+  //   status: { $in: ["UNPAID", "PARTIALLY_PAID", "PAID"] },
+  //   billType: "MONTHLY",
+  //   billingDate: {
+  //     $gte: startOfMonth,
+  //     $lte: endOfMonth,
+  //   },
+  // });
 
-  if (existingPublishedBill) {
-    throw new Error(
-      `Đã tồn tại hóa đơn đã phát hành tháng ${billingMonth.getMonth() + 1}/${billingMonth.getFullYear()} cho phòng ${room.roomNumber}`
-      );
-  }
+  // if (existingPublishedBill) {
+  //   throw new Error(
+  //     `Đã tồn tại hóa đơn đã phát hành tháng ${billingMonth.getMonth() + 1}/${billingMonth.getFullYear()} cho phòng ${room.roomNumber}`
+  //     );
+  // }
 
   // Tính toán các khoản phí
   const feeCalculation = await calculateRoomMonthlyFees({

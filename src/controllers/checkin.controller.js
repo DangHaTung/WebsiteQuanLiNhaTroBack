@@ -220,13 +220,49 @@ export const createOnlineCheckin = async (req, res) => {
     checkinRecord.receiptBillId = receiptBill._id;
     await checkinRecord.save();
 
+    // Generate payment token for public payment link
+    const crypto = (await import("crypto")).default;
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30); // Valid for 30 days
+
+    receiptBill.paymentToken = token;
+    receiptBill.paymentTokenExpires = expiresAt;
+    await receiptBill.save();
+
+    // Build payment URL
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const paymentUrl = `${frontendUrl}/public/payment/${receiptBill._id}/${token}`;
+
+    // Send email with payment link
+    const tenantEmail = email;
+    const tenantName = fullName;
+    const roomNumber = room.roomNumber;
+
+    if (tenantEmail) {
+      const { sendPaymentLinkEmail } = await import("../services/email/notification.service.js");
+      await sendPaymentLinkEmail({
+        to: tenantEmail,
+        fullName: tenantName,
+        paymentUrl,
+        billId: receiptBill._id.toString(),
+        amount: Number(deposit),
+        roomNumber,
+        expiresAt,
+      });
+      console.log(`📧 Sent payment link email to ${tenantEmail}`);
+    }
+
     return res.status(201).json({
       success: true,
-      message: "Tạo hợp đồng tạm và bill phiếu thu (ONLINE) thành công",
+      message: "Tạo hợp đồng tạm và bill phiếu thu (ONLINE) thành công. Email đã được gửi.",
       data: {
         checkinId: checkinRecord._id,
         contractId: contract._id,
         receiptBillId: receiptBill._id,
+        paymentUrl,
+        paymentToken: token,
+        emailSent: !!tenantEmail,
       },
     });
   } catch (err) {

@@ -76,6 +76,16 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
                     checkin.status = "COMPLETED";
                     await checkin.save({ session });
                     console.log(`✅ Auto-completed checkin ${checkin._id} after payment`);
+                    
+                    // ✅ Tự động tạo account và gửi email
+                    try {
+                        const { autoCreateAccountAndSendEmail } = await import("../services/user/autoCreateAccount.service.js");
+                        await autoCreateAccountAndSendEmail(checkin);
+                        console.log(`✅ Auto-created account and sent email for checkin ${checkin._id}`);
+                    } catch (emailErr) {
+                        console.error(`❌ Failed to create account/send email for checkin ${checkin._id}:`, emailErr);
+                        // Không throw error để không block payment flow
+                    }
                 } else if (checkin) {
                     console.log(`⚠️ Checkin found but status is ${checkin.status}, not CREATED`);
                 } else {
@@ -146,6 +156,16 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
                 checkin.status = "COMPLETED";
                 await checkin.save();
                 console.log(`✅ Auto-completed checkin ${checkin._id} after payment (fallback)`);
+                
+                // ✅ Tự động tạo account và gửi email (fallback mode)
+                try {
+                    const { autoCreateAccountAndSendEmail } = await import("../services/user/autoCreateAccount.service.js");
+                    await autoCreateAccountAndSendEmail(checkin);
+                    console.log(`✅ Auto-created account and sent email for checkin ${checkin._id} (fallback)`);
+                } catch (emailErr) {
+                    console.error(`❌ Failed to create account/send email for checkin ${checkin._id} (fallback):`, emailErr);
+                    // Không throw error để không block payment flow
+                }
             } else if (checkin) {
                 console.log(`⚠️ [FALLBACK] Checkin found but status is ${checkin.status}, not CREATED`);
             } else {
@@ -246,6 +266,41 @@ export const vnpayReturn = async (req, res) => {
                 console.log("💾 Saved returnUrl before apply:", savedReturnUrl);
                 
                 await applyPaymentToBill(payment, params);
+                
+                // Get bill and contract info for email
+                const bill = await Bill.findById(payment.billId).populate('contractId');
+                
+                // Auto-create account if this is a public payment (guest checkout)
+                if (bill && bill.paymentToken) {
+                    console.log("🔍 Detected public payment, auto-creating account...");
+                    const { autoCreateAccountAfterPayment } = await import("./publicPayment.controller.js");
+                    await autoCreateAccountAfterPayment(bill);
+                }
+                
+                // Send payment success email to tenant
+                if (bill && bill.contractId) {
+                    try {
+                        const contract = bill.contractId;
+                        const tenantEmail = contract.tenantSnapshot?.email || contract.tenantId?.email;
+                        const tenantName = contract.tenantSnapshot?.fullName || contract.tenantId?.fullName || "Khách hàng";
+                        
+                        if (tenantEmail) {
+                            const { sendPaymentSuccessEmail } = await import("../services/email/notification.service.js");
+                            await sendPaymentSuccessEmail({
+                                to: tenantEmail,
+                                fullName: tenantName,
+                                bill: bill,
+                                amount: decToNumber(payment.amount),
+                                transactionId: txnRef,
+                                provider: "VNPAY",
+                            });
+                            console.log("📧 Sent payment success email to:", tenantEmail);
+                        }
+                    } catch (emailError) {
+                        console.error("❌ Error sending payment success email:", emailError);
+                        // Don't fail the payment if email fails
+                    }
+                }
                 
                 // Ưu tiên returnUrl đã lưu, fallback về default
                 const returnUrl = savedReturnUrl || `${process.env.FRONTEND_URL || "http://localhost:5173"}/admin/checkins`;

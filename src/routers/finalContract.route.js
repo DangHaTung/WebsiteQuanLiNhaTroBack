@@ -8,6 +8,8 @@ import {
   deleteFileFromFinalContract,
   createForCoTenant,
   cancelFinalContract,
+  extendContract,
+  getExpiringSoonContracts,
 } from "../controllers/finalContract.controller.js";
 import { finalContractParamsSchema, deleteFileParamsSchema, assignTenantSchema } from "../validations/finalContract.validation.js";
 import { validateParams, validateBody, validatePagination } from "../middleware/validation.middleware.js";
@@ -99,6 +101,23 @@ router.put(
   authorize('ADMIN'),
   validateParams(finalContractParamsSchema),
   asyncHandler(cancelFinalContract)
+);
+
+// Extend contract (gia hạn hợp đồng) - Admin only
+router.put(
+  "/final-contracts/:id/extend",
+  authenticateToken,
+  authorize('ADMIN'),
+  validateParams(finalContractParamsSchema),
+  asyncHandler(extendContract)
+);
+
+// Get contracts expiring soon - Admin only
+router.get(
+  "/final-contracts/expiring-soon",
+  authenticateToken,
+  authorize('ADMIN'),
+  asyncHandler(getExpiringSoonContracts)
 );
 
 export default router;
