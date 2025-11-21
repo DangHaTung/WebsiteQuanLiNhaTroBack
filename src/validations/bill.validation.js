@@ -285,3 +285,6 @@ export const billParamsSchema = Joi.object({
       'any.required': 'ID là bắt buộc',
     }),
 });
+
+// Schema cho params với billId (dùng cho generate-payment-link) - giống billParamsSchema
+export const billIdParamsSchema = billParamsSchema;

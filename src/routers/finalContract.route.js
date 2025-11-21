@@ -2,7 +2,6 @@ import express from "express";
 import {
   getAllFinalContracts,
   uploadFiles,
-  uploadCCCDFile,
   getRemainingAmount,
   deleteFinalContractById,
   assignTenantToFinalContract,
@@ -14,7 +13,7 @@ import { finalContractParamsSchema, deleteFileParamsSchema, assignTenantSchema }
 import { validateParams, validateBody, validatePagination } from "../middleware/validation.middleware.js";
 import { authenticateToken, authorize } from "../middleware/auth.middleware.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
-import { uploadFinalContractFiles, uploadCCCDFiles } from "../middleware/upload.middleware.js";
+import { uploadFinalContractFiles } from "../middleware/upload.middleware.js";
 
 const router = express.Router();
 
@@ -35,16 +34,6 @@ router.post(
   validateParams(finalContractParamsSchema),
   uploadFinalContractFiles,
   asyncHandler(uploadFiles)
-);
-
-// Upload CCCD files for tenant verification
-router.post(
-  "/final-contracts/:id/upload-cccd",
-  authenticateToken,
-  authorize('ADMIN'),
-  validateParams(finalContractParamsSchema),
-  uploadCCCDFiles,
-  asyncHandler(uploadCCCDFile)
 );
 
 // (Removed) approve route: upload now finalizes contract (SIGNED)

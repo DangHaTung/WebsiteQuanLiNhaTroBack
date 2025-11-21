@@ -62,29 +62,8 @@ const contractStorage = new CloudinaryStorage({
   },
 });
 
-const cccdStorage = new CloudinaryStorage({
-  cloudinary,
-  params: async (req, file) => {
-    const isPdfMime = file.mimetype === "application/pdf";
-    const isPdfName = /\.pdf$/i.test(file.originalname || "");
-    const isPdf = isPdfMime || isPdfName;
-    return {
-      folder: "cccd_files",
-      resource_type: isPdf ? "raw" : "image",
-      format: undefined,
-      public_id: undefined,
-    };
-  },
-});
-
 export const uploadFinalContractFiles = multer({
   storage: contractStorage,
-  limits: { fileSize: 20 * 1024 * 1024 },
-  fileFilter,
-}).array("files", 10);
-
-export const uploadCCCDFiles = multer({
-  storage: cccdStorage,
   limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter,
 }).array("files", 10);

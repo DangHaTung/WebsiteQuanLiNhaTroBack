@@ -412,14 +412,36 @@ export const zaloReturn = async (req, res) => {
 
     console.log("📦 Payment status:", payment.status);
 
-    // Lưu return data vào metadata (không apply payment ở đây)
+    // Lưu return data vào metadata
     if (!payment.metadata) payment.metadata = {};
     payment.metadata.returnData = req.query;
     await payment.save();
 
     // Redirect về frontend với thông báo thành công
     if (status === "1" || status === "success") {
-      console.log("✅ Payment success - redirecting to frontend");
+      console.log("✅ Payment success - checking if callback already processed...");
+      
+      // Fallback: Nếu callback chưa được gọi (payment vẫn PENDING), apply payment ở đây
+      // Điều này xảy ra khi callback URL là localhost và ZaloPay không thể gọi được
+      if (payment.status === "PENDING") {
+        console.log("⚠️ Payment still PENDING - callback may not have been called (localhost issue)");
+        console.log("🔄 Applying payment as fallback in return handler...");
+        try {
+          const savedReturnUrl = payment.metadata?.returnUrl;
+          await applyPaymentToBill(payment, { 
+            ...req.query, 
+            returnUrl: savedReturnUrl,
+            source: "zaloReturn_fallback" 
+          });
+          console.log("✅ Payment applied successfully in return handler");
+        } catch (e) {
+          console.error("❌ applyPaymentToBill error (ZaloPay return fallback):", e);
+          // Vẫn redirect về frontend để user biết thanh toán thành công
+          // Admin có thể check và apply manually nếu cần
+        }
+      } else if (payment.status === "SUCCESS") {
+        console.log("✅ Payment already processed by callback");
+      }
       
       // Lấy returnUrl từ payment metadata (đã lưu khi tạo payment)
       const savedReturnUrl = payment.metadata?.returnUrl;

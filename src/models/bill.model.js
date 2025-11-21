@@ -51,6 +51,10 @@ const billSchema = new Schema(
 
     note: { type: String },
 
+    // Payment token for public payment link
+    paymentToken: { type: String, index: true },
+    paymentTokenExpiresAt: { type: Date },
+
    createdAt: { type: Date, default: Date.now },
    updatedAt: { type: Date, default: Date.now },
   },

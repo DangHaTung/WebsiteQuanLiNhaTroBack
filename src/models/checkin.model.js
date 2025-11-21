@@ -36,6 +36,7 @@ const checkinSchema = new Schema(
     tenantSnapshot: {
       fullName: { type: String },
       phone: { type: String },
+      email: { type: String },
       identityNo: { type: String },
       address: { type: String },
       note: { type: String },
