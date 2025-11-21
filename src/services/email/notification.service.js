@@ -1,5 +1,6 @@
 // Service gửi email notification
 import nodemailer from 'nodemailer';
+import { createTransport } from 'nodemailer';
 
 /**
  * Tạo transporter cho nodemailer
@@ -11,7 +12,7 @@ function createTransporter() {
     return null;
   }
   
-  return nodemailer.createTransporter({
+  return createTransport({
     host: process.env.EMAIL_HOST,
     port: parseInt(process.env.EMAIL_PORT || '587'),
     secure: process.env.EMAIL_SECURE === 'true', // true for 465, false for other ports
@@ -240,9 +241,78 @@ export async function sendAccountCreatedEmail({ to, fullName, email, password, l
   });
 }
 
+/**
+ * Gửi email thông báo thanh toán thành công
+ */
+export async function sendPaymentSuccessEmail({ to, fullName, bill, amount, transactionId, provider }) {
+  const subject = `Thanh toán thành công`;
+  
+  const billTypeText = bill.billType === 'RECEIPT' ? 'Tiền đặt cọc' :
+                       bill.billType === 'CONTRACT' ? 'Tiền thuê tháng đầu' : 
+                       bill.billType === 'MONTHLY' ? 'Hóa đơn hàng tháng' : 
+                       'Phiếu thu';
+  
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #52c41a; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }
+        .content { background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-top: none; }
+        .info-box { background-color: white; padding: 15px; margin: 15px 0; border-left: 4px solid #52c41a; }
+        .amount { font-size: 24px; font-weight: bold; color: #52c41a; }
+        .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #666; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h2>✅ Thanh toán thành công</h2>
+        </div>
+        <div class="content">
+          <p>Xin chào <strong>${fullName}</strong>,</p>
+          
+          <p>Thanh toán của bạn đã được xác nhận thành công!</p>
+          
+          <div class="info-box">
+            <h3>Thông tin thanh toán:</h3>
+            <ul>
+              <li><strong>Loại hóa đơn:</strong> ${billTypeText}</li>
+              <li><strong>Mã hóa đơn:</strong> ${bill._id.toString().substring(0, 8)}...</li>
+              <li><strong>Số tiền:</strong> <span class="amount">${(amount || 0).toLocaleString('vi-VN')} VNĐ</span></li>
+              <li><strong>Phương thức:</strong> ${provider.toUpperCase()}</li>
+              <li><strong>Mã giao dịch:</strong> ${transactionId}</li>
+              <li><strong>Thời gian:</strong> ${new Date().toLocaleString('vi-VN')}</li>
+            </ul>
+          </div>
+          
+          <p>Cảm ơn bạn đã thanh toán đúng hạn!</p>
+          
+          <p>Trân trọng,<br><strong>Ban quản lý</strong></p>
+        </div>
+        <div class="footer">
+          <p>Email tự động từ hệ thống quản lý phòng trọ</p>
+          <p>Vui lòng không trả lời email này</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+  
+  return await sendEmailNotification({
+    to,
+    subject,
+    html,
+  });
+}
+
 export default {
   sendEmailNotification,
   sendBillNotificationToTenant,
   sendPaymentLinkEmail,
   sendAccountCreatedEmail,
+  sendPaymentSuccessEmail,
 };

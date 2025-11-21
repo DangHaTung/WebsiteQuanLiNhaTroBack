@@ -34,22 +34,14 @@ router.get("/payment/:billId/:token", async (req, res) => {
     }
 
     // Check token expiry
-    if (bill.paymentTokenExpiresAt && new Date() > bill.paymentTokenExpiresAt) {
+    if (bill.paymentTokenExpires && new Date() > bill.paymentTokenExpires) {
       return res.status(400).json({
         success: false,
         message: "Link thanh toán đã hết hạn",
       });
     }
 
-    // Check bill status
-    if (bill.status === "PAID") {
-      return res.status(400).json({
-        success: false,
-        message: "Bill đã thanh toán rồi",
-      });
-    }
-
-    // Get contract and room info
+    // Get contract and room info (không block nếu đã thanh toán, vẫn cho xem thông tin)
     const contract = bill.contractId;
     const room = contract ? await Room.findById(contract.roomId) : null;
 
@@ -110,7 +102,7 @@ router.post("/payment/:billId/:token/create", async (req, res) => {
       return res.status(400).json({ error: "Token không hợp lệ" });
     }
 
-    if (bill.paymentTokenExpiresAt && new Date() > bill.paymentTokenExpiresAt) {
+    if (bill.paymentTokenExpires && new Date() > bill.paymentTokenExpires) {
       return res.status(400).json({ error: "Link thanh toán đã hết hạn" });
     }
 

@@ -459,6 +459,14 @@ export const publishDraftBill = async (req, res) => {
     const { id } = req.params;
     const { electricityKwh, waterM3 = 0, occupantCount = 1, vehicleCount = 0 } = req.body;
 
+    // Validate: số xe không được vượt quá số người
+    if (vehicleCount > occupantCount) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Số xe (${vehicleCount}) không được vượt quá số người ở (${occupantCount})` 
+      });
+    }
+
     const bill = await Bill.findById(id).populate("contractId");
     if (!bill) {
       return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
@@ -531,6 +539,15 @@ export const publishBatchDraftBills = async (req, res) => {
     for (const item of bills) {
       try {
         const { billId, electricityKwh, waterM3 = 0, occupantCount = 1, vehicleCount = 0 } = item;
+
+        // Validate: số xe không được vượt quá số người
+        if (vehicleCount > occupantCount) {
+          results.failed.push({ 
+            billId, 
+            error: `Số xe (${vehicleCount}) không được vượt quá số người ở (${occupantCount})` 
+          });
+          continue;
+        }
 
         const bill = await Bill.findById(billId).populate("contractId");
         if (!bill || bill.status !== "DRAFT") {

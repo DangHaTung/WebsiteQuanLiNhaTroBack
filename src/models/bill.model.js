@@ -21,6 +21,10 @@ const billSchema = new Schema(
       default: "UNPAID",
     },
 
+    // Payment token for public payment link (guest checkout)
+    paymentToken: { type: String, unique: true, sparse: true },
+    paymentTokenExpires: { type: Date },
+
     lineItems: [
       {
         item: { type: String, required: true },
