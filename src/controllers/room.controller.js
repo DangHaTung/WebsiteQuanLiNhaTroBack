@@ -176,6 +176,17 @@ export const createRoom = async (req, res) => {
             });
         }
 
+        // Kiểm tra trùng tên phòng
+        const existingRoom = await Room.findOne({ 
+            roomNumber: roomNumber.trim() 
+        });
+        if (existingRoom) {
+            return res.status(400).json({ 
+                message: `Số phòng "${roomNumber}" đã tồn tại. Vui lòng chọn số phòng khác.`,
+                success: false 
+            });
+        }
+
         let uploadedImages = [];
         if (Array.isArray(req.files)) {
             uploadedImages = req.files.map((f) => ({ url: f.path, publicId: f.filename }));
@@ -248,6 +259,20 @@ export const updateRoom = async (req, res) => {
                 message: "ID phòng không hợp lệ",
                 success: false 
             });
+
+        // Kiểm tra trùng tên phòng nếu có cập nhật roomNumber
+        if (req.body.roomNumber) {
+            const existingRoom = await Room.findOne({ 
+                roomNumber: req.body.roomNumber.trim(),
+                _id: { $ne: id } // Loại trừ phòng hiện tại
+            });
+            if (existingRoom) {
+                return res.status(400).json({ 
+                    message: `Số phòng "${req.body.roomNumber}" đã tồn tại. Vui lòng chọn số phòng khác.`,
+                    success: false 
+                });
+            }
+        }
 
         const update = { ...req.body };
         delete update._id;
