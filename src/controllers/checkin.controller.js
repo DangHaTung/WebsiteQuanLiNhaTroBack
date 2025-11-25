@@ -14,6 +14,7 @@ function addMonths(date, months) {
   d.setMonth(d.getMonth() + Number(months));
   return d;
 }
+// Tạo check-in với phiếu thu tiền mặt (OFFLINE)
 
 export const createCashCheckin = async (req, res) => {
   try {
@@ -25,7 +26,7 @@ export const createCashCheckin = async (req, res) => {
     if (!(["ADMIN"].includes(role))) {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
-
+// Lấy dữ liệu từ body
     const {
       roomId,
       checkinDate,
@@ -42,14 +43,14 @@ export const createCashCheckin = async (req, res) => {
       // Nếu đã có tài khoản thì gửi kèm tenantId
       tenantId,
     } = req.body || {};
-
+// Kiểm tra dữ liệu bắt buộc
     if (!roomId || !checkinDate || !duration || deposit === undefined) {
       return res.status(400).json({ success: false, message: "roomId, checkinDate, duration, deposit are required" });
     }
-
+// Lấy thông tin phòng
     const room = await Room.findById(roomId);
     if (!room) return res.status(404).json({ success: false, message: "Room not found" });
-
+  // Tính toán ngày kết thúc và tiền thuê hàng tháng
     const startDate = new Date(checkinDate);
     const endDate = addMonths(startDate, duration);
     const monthlyRent = Number(room.pricePerMonth || 0);
@@ -89,7 +90,7 @@ export const createCashCheckin = async (req, res) => {
         deposit: toDec(deposit),
       },
       tenantSnapshot: checkinRecord.tenantSnapshot,
-    };
+    };// Gắn tenantId nếu có
     if (tenantId) {
       contractPayload.tenantId = tenantId;
     }
