@@ -40,22 +40,22 @@ export const createCashCheckin = async (req, res) => {
       identityNo,
       address,
       tenantNote,
-      // Nếu đã có tài khoản thì gửi kèm tenantId
+ 
       tenantId,
     } = req.body || {};
-// Kiểm tra dữ liệu bắt buộc
+
     if (!roomId || !checkinDate || !duration || deposit === undefined) {
       return res.status(400).json({ success: false, message: "roomId, checkinDate, duration, deposit are required" });
     }
-// Lấy thông tin phòng
+
     const room = await Room.findById(roomId);
     if (!room) return res.status(404).json({ success: false, message: "Room not found" });
-  // Tính toán ngày kết thúc và tiền thuê hàng tháng
+ 
     const startDate = new Date(checkinDate);
     const endDate = addMonths(startDate, duration);
     const monthlyRent = Number(room.pricePerMonth || 0);
 
-    // 1) Ghi nhận bản ghi Checkin trước — nguồn dữ liệu gốc cho thông tin khách
+   
     const checkinRecord = await Checkin.create({
       tenantId: tenantId || undefined,
       staffId: user._id,
@@ -76,7 +76,7 @@ export const createCashCheckin = async (req, res) => {
       status: "CREATED",
     });
 
-    // 2) Tạo hợp đồng tạm (biên lai cơ sở) sử dụng snapshot từ Checkin
+    
     const contractPayload = {
       roomId,
       startDate,
@@ -90,13 +90,13 @@ export const createCashCheckin = async (req, res) => {
         deposit: toDec(deposit),
       },
       tenantSnapshot: checkinRecord.tenantSnapshot,
-    };// Gắn tenantId nếu có
+    };
     if (tenantId) {
       contractPayload.tenantId = tenantId;
     }
     const contract = await Contract.create(contractPayload);
 
-    // Tạo bill phiếu thu (RECEIPT) cho OFFLINE: trạng thái chờ xác nhận tiền mặt
+  
     const receiptLineItems = [
       {
         item: "Đặt cọc",
