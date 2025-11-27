@@ -6,6 +6,7 @@ const billSchema = new Schema(
   {
     contractId: { type: Schema.Types.ObjectId, ref: "Contract", required: true },
     finalContractId: { type: Schema.Types.ObjectId, ref: "FinalContract" }, // Link to FinalContract if applicable
+    tenantId: { type: Schema.Types.ObjectId, ref: "User" }, // Link to User account (for RECEIPT bills)
     billingDate: { type: Date, required: true },
 
     // Phân loại bill theo nghiệp vụ

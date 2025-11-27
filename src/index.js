@@ -32,6 +32,7 @@ import moveOutRequestRoute from "./routers/moveOutRequest.route.js"; // Move-out
 import { scheduleMonthlyBillingJob } from "./jobs/monthlyBilling.job.js"; // Cron job tự động tạo hóa đơn
 import { scheduleRentReminderJob } from "./jobs/rentReminder.job.js"; // Cron job nhắc nhở thanh toán
 import { scheduleUpcomingBillJob } from "./jobs/upcomingBill.job.js"; // Cron job thông báo hóa đơn sắp tới
+import { scheduleReceiptExpirationJob, scheduleReceiptExpirationWarningJob } from "./jobs/receiptExpiration.job.js"; // Cron job kiểm tra và hủy phiếu thu quá hạn
 import { initializeSocketIO } from "./services/socket/socket.service.js"; // Socket.io service
 
 
@@ -127,6 +128,15 @@ mongoose
         console.log('✅ Cron job thông báo hóa đơn sắp tới đã được kích hoạt (ngày 29 và ngày 3)');
       } else {
         console.log('⚠️  Cron job thông báo hóa đơn sắp tới đã bị tắt (ENABLE_UPCOMING_BILL_JOB=false)');
+      }
+      
+      // Khởi động cron job kiểm tra và hủy phiếu thu quá hạn
+      if (process.env.ENABLE_RECEIPT_EXPIRATION_JOB !== 'false') {
+        scheduleReceiptExpirationJob();
+        scheduleReceiptExpirationWarningJob();
+        console.log('✅ Cron job kiểm tra và hủy phiếu thu quá hạn đã được kích hoạt');
+      } else {
+        console.log('⚠️  Cron job kiểm tra và hủy phiếu thu quá hạn đã bị tắt (ENABLE_RECEIPT_EXPIRATION_JOB=false)');
       }
     });
   })

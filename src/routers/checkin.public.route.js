@@ -1,6 +1,7 @@
 import express from "express";
 import { authenticateToken, authorize } from "../middleware/auth.middleware.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
+import { uploadCccdImages } from "../middleware/upload.middleware.js";
 import { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSampleDocx, cancelCheckin, getAllCheckins, completeCheckin } from "../controllers/checkin.controller.js";
 
 const router = express.Router();
@@ -9,10 +10,10 @@ const router = express.Router();
 router.get("/checkins", authenticateToken, authorize('ADMIN'), asyncHandler(getAllCheckins));
 
 // Tạo hợp đồng + hóa đơn (đặt cọc + tháng đầu) khi thanh toán tiền mặt
-router.post("/checkin/cash", authenticateToken, authorize('ADMIN'), asyncHandler(createCashCheckin));
+router.post("/checkin/cash", authenticateToken, authorize('ADMIN'), uploadCccdImages, asyncHandler(createCashCheckin));
 
 // Tạo check-in ONLINE: sinh bill phiếu thu UNPAID để thanh toán online
-router.post("/checkin/online", authenticateToken, authorize('ADMIN'), asyncHandler(createOnlineCheckin));
+router.post("/checkin/online", authenticateToken, authorize('ADMIN'), uploadCccdImages, asyncHandler(createOnlineCheckin));
 
 // Lấy dữ liệu in hợp đồng mẫu từ Checkin — chỉ khi receipt đã PAID
 router.get("/checkins/:id/print-data", authenticateToken, authorize('ADMIN'), asyncHandler(getPrintableSample));

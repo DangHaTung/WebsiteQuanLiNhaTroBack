@@ -68,4 +68,33 @@ export const uploadFinalContractFiles = multer({
   fileFilter,
 }).array("files", 10);
 
+// ===== CCCD Uploads =====
+const cccdStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => {
+    return {
+      folder: "cccd",
+      resource_type: "image",
+      format: undefined,
+      public_id: undefined,
+      transformation: [{ quality: "auto:good" }],
+    };
+  },
+});
+
+export const uploadCccdImages = multer({
+  storage: cccdStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowedMimes.includes(file.mimetype)) {
+      return cb(new Error("Chỉ chấp nhận file ảnh (JPEG, PNG, WebP)"));
+    }
+    cb(null, true);
+  },
+}).fields([
+  { name: "cccdFront", maxCount: 1 },
+  { name: "cccdBack", maxCount: 1 },
+]);
+
 

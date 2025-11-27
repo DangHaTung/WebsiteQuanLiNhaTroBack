@@ -66,16 +66,29 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
             payment.metadata = { ...rawParams, returnUrl: oldReturnUrl };
             await payment.save({ session });
 
-            // Tự động complete checkin nếu là bill RECEIPT đã PAID
+            // Tự động complete checkin và cập nhật room status nếu là bill RECEIPT đã PAID
             if (bill.billType === "RECEIPT" && bill.status === "PAID") {
                 console.log(`🔍 Bill is RECEIPT and PAID, checking for checkin with receiptBillId: ${bill._id}`);
                 const Checkin = (await import("../models/checkin.model.js")).default;
-                const checkin = await Checkin.findOne({ receiptBillId: bill._id }).session(session);
+                const Room = (await import("../models/room.model.js")).default;
+                const checkin = await Checkin.findOne({ receiptBillId: bill._id }).populate("roomId").session(session);
                 console.log(`🔍 Found checkin:`, checkin ? `ID=${checkin._id}, status=${checkin.status}` : 'null');
                 if (checkin && checkin.status === "CREATED") {
                     checkin.status = "COMPLETED";
+                    checkin.receiptPaidAt = new Date(); // Lưu thời điểm thanh toán phiếu thu
                     await checkin.save({ session });
-                    console.log(`✅ Auto-completed checkin ${checkin._id} after payment`);
+                    console.log(`✅ Auto-completed checkin ${checkin._id} after payment, receiptPaidAt: ${checkin.receiptPaidAt}`);
+                    
+                    // Cập nhật room status = DEPOSITED, occupantCount = 0
+                    if (checkin.roomId) {
+                        const room = await Room.findById(checkin.roomId._id || checkin.roomId).session(session);
+                        if (room) {
+                            room.status = "DEPOSITED";
+                            // occupantCount vẫn là 0 (chưa vào ở)
+                            await room.save({ session });
+                            console.log(`✅ Updated room ${room._id} status to DEPOSITED`);
+                        }
+                    }
                     
                     // ✅ Tự động tạo account và gửi email
                     try {
@@ -90,6 +103,25 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
                     console.log(`⚠️ Checkin found but status is ${checkin.status}, not CREATED`);
                 } else {
                     console.log(`⚠️ No checkin found with receiptBillId: ${bill._id}`);
+                }
+            }
+            
+            // Cập nhật room status = OCCUPIED và occupantCount khi thanh toán CONTRACT bill
+            if (bill.billType === "CONTRACT" && bill.status === "PAID" && bill.contractId) {
+                const Room = (await import("../models/room.model.js")).default;
+                const Contract = (await import("../models/contract.model.js")).default;
+                const contract = await Contract.findById(bill.contractId).populate("roomId").session(session);
+                if (contract && contract.roomId) {
+                    const room = await Room.findById(contract.roomId._id || contract.roomId).session(session);
+                    if (room) {
+                        room.status = "OCCUPIED";
+                        // Cập nhật occupantCount từ contract (nếu có)
+                        // Note: occupantCount có thể được tính từ số tenant + co-tenants
+                        const occupantCount = contract.coTenants?.length ? contract.coTenants.length + 1 : 1;
+                        room.occupantCount = occupantCount;
+                        await room.save({ session });
+                        console.log(`✅ Updated room ${room._id} status to OCCUPIED, occupantCount: ${occupantCount}`);
+                    }
                 }
             }
         });
@@ -146,16 +178,29 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
         payment.metadata = { ...rawParams, returnUrl: oldReturnUrl };
         await payment.save();
 
-        // Tự động complete checkin nếu là bill RECEIPT đã PAID (fallback mode)
+        // Tự động complete checkin và cập nhật room status nếu là bill RECEIPT đã PAID (fallback mode)
         if (bill.billType === "RECEIPT" && bill.status === "PAID") {
             console.log(`🔍 [FALLBACK] Bill is RECEIPT and PAID, checking for checkin with receiptBillId: ${bill._id}`);
             const Checkin = (await import("../models/checkin.model.js")).default;
-            const checkin = await Checkin.findOne({ receiptBillId: bill._id });
+            const Room = (await import("../models/room.model.js")).default;
+            const checkin = await Checkin.findOne({ receiptBillId: bill._id }).populate("roomId");
             console.log(`🔍 [FALLBACK] Found checkin:`, checkin ? `ID=${checkin._id}, status=${checkin.status}` : 'null');
             if (checkin && checkin.status === "CREATED") {
                 checkin.status = "COMPLETED";
+                checkin.receiptPaidAt = new Date(); // Lưu thời điểm thanh toán phiếu thu
                 await checkin.save();
-                console.log(`✅ Auto-completed checkin ${checkin._id} after payment (fallback)`);
+                console.log(`✅ Auto-completed checkin ${checkin._id} after payment (fallback), receiptPaidAt: ${checkin.receiptPaidAt}`);
+                
+                // Cập nhật room status = DEPOSITED, occupantCount = 0
+                if (checkin.roomId) {
+                    const room = await Room.findById(checkin.roomId._id || checkin.roomId);
+                    if (room) {
+                        room.status = "DEPOSITED";
+                        room.occupantCount = 0; // Chưa vào ở
+                        await room.save();
+                        console.log(`✅ [FALLBACK] Updated room ${room._id} status to DEPOSITED`);
+                    }
+                }
                 
                 // ✅ Tự động tạo account và gửi email (fallback mode)
                 try {
@@ -170,6 +215,23 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
                 console.log(`⚠️ [FALLBACK] Checkin found but status is ${checkin.status}, not CREATED`);
             } else {
                 console.log(`⚠️ [FALLBACK] No checkin found with receiptBillId: ${bill._id}`);
+            }
+        }
+        
+        // Cập nhật room status = OCCUPIED và occupantCount khi thanh toán CONTRACT bill (fallback mode)
+        if (bill.billType === "CONTRACT" && bill.status === "PAID" && bill.contractId) {
+            const Room = (await import("../models/room.model.js")).default;
+            const Contract = (await import("../models/contract.model.js")).default;
+            const contract = await Contract.findById(bill.contractId).populate("roomId");
+            if (contract && contract.roomId) {
+                const room = await Room.findById(contract.roomId._id || contract.roomId);
+                if (room) {
+                    room.status = "OCCUPIED";
+                    const occupantCount = contract.coTenants?.length ? contract.coTenants.length + 1 : 1;
+                    room.occupantCount = occupantCount;
+                    await room.save();
+                    console.log(`✅ [FALLBACK] Updated room ${room._id} status to OCCUPIED, occupantCount: ${occupantCount}`);
+                }
             }
         }
     } finally {
@@ -329,15 +391,26 @@ export const vnpayReturn = async (req, res) => {
 // POST /pay/vnpay/ipn
 export const vnpayIPN = async (req, res) => {
     try {
+        console.log("🔔 VNPay IPN received:", new Date().toISOString());
+        console.log("📥 VNPay IPN params:", JSON.stringify(req.body, null, 2));
+        
         const params = req.body || {};
         const verify = vnpayService.verifyVnPayResponse(params);
         if (!verify.valid) {
-            console.warn("VNPay IPN invalid checksum", verify);
+            console.warn("❌ VNPay IPN invalid checksum", verify);
             return res.json({ RspCode: "97", Message: "Invalid checksum" });
         }
 
         const txnRef = params.vnp_TxnRef;
         const rspCode = params.vnp_ResponseCode;
+        
+        console.log("📦 VNPay IPN data:", {
+            txnRef,
+            rspCode,
+            amount: params.vnp_Amount,
+            orderInfo: params.vnp_OrderInfo,
+            status: rspCode === "00" ? "SUCCESS" : "FAILED"
+        });
 
         // find existing Payment
         let payment = await Payment.findOne({ provider: "VNPAY", transactionId: txnRef });
@@ -373,14 +446,18 @@ export const vnpayIPN = async (req, res) => {
 
         if (rspCode === "00") {
             // apply and respond confirm
+            console.log("✅ VNPay IPN payment SUCCESS - Processing...");
             try {
                 await applyPaymentToBill(payment, params);
+                console.log("✅ VNPay IPN payment applied successfully to bill");
                 return res.json({ RspCode: "00", Message: "Confirm Success" });
             } catch (e) {
-                console.error("IPN applyPaymentToBill error:", e);
+                console.error("❌ VNPay IPN applyPaymentToBill error:", e);
+                console.error("❌ Error stack:", e.stack);
                 return res.json({ RspCode: "99", Message: "Internal error" });
             }
         } else {
+            console.log("❌ VNPay IPN payment FAILED - Response code:", rspCode);
             payment.status = "FAILED";
             payment.metadata = params;
             await payment.save();

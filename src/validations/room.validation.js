@@ -54,10 +54,10 @@ export const createRoomSchema = Joi.object({
 
 
   status: Joi.string()
-    .valid('AVAILABLE', 'OCCUPIED', 'MAINTENANCE')
+    .valid('AVAILABLE', 'DEPOSITED', 'OCCUPIED', 'MAINTENANCE')
     .default('AVAILABLE')
     .messages({
-      'any.only': 'Status phải là AVAILABLE, OCCUPIED hoặc MAINTENANCE',
+      'any.only': 'Status phải là AVAILABLE, DEPOSITED, OCCUPIED hoặc MAINTENANCE',
     }),
 
   // Cho phép truyền URL ảnh trong JSON
@@ -169,10 +169,10 @@ export const updateRoomSchema = Joi.object({
 
 
   status: Joi.string()
-    .valid('AVAILABLE', 'OCCUPIED', 'MAINTENANCE')
+    .valid('AVAILABLE', 'DEPOSITED', 'OCCUPIED', 'MAINTENANCE')
     .optional()
     .messages({
-      'any.only': 'Status phải là AVAILABLE, OCCUPIED hoặc MAINTENANCE',
+      'any.only': 'Status phải là AVAILABLE, DEPOSITED, OCCUPIED hoặc MAINTENANCE',
     }),
 
   images: Joi.array()
