@@ -23,7 +23,7 @@ router.post("/momo/ipn", express.json(), momoController.momoIPN);
 
 router.post(
   "/zalopay/callback",
-  express.urlencoded({ extended: false }),
+  express.json(), // ZaloPay gửi callback dưới dạng application/json
   zaloController.zaloCallback
 );
 router.get("/zalopay/return", zaloController.zaloReturn);

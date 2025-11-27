@@ -235,10 +235,28 @@ export const zaloCallback = async (req, res) => {
   let result = {};
   try {
     console.log("🔔 ZaloPay Callback received:", new Date().toISOString());
+    console.log("📥 Raw callback body:", JSON.stringify(req.body, null, 2));
     
+    // ZaloPay gửi callback dưới dạng application/json với format:
+    // { data: "JSON string", mac: "signature", type: 1 }
     const dataStr = req.body.data;
     const reqMac = req.body.mac;
+    const callbackType = req.body.type; // type: 1 = Order, 2 = Agreement
+    
+    if (!dataStr) {
+      console.log("❌ ZaloPay callback: Missing data");
+      result.return_code = -1;
+      result.return_message = "Missing data";
+      return res.json(result);
+    }
+
+    // Verify MAC: mac = HMAC(HmacSHA256, callback key (key2), data)
     const mac = CryptoJS.HmacSHA256(dataStr, config.key2).toString();
+    console.log("🔐 MAC verification:", {
+      received: reqMac,
+      calculated: mac,
+      match: reqMac === mac
+    });
 
     if (reqMac !== mac) {
       console.log("❌ ZaloPay callback: Invalid MAC");
@@ -247,59 +265,81 @@ export const zaloCallback = async (req, res) => {
       return res.json(result);
     }
 
+    // Parse data JSON string
     const dataJson = JSON.parse(dataStr);
-    const { app_trans_id, zp_trans_id, amount, return_code } = dataJson;
+    const { app_trans_id, zp_trans_id, amount } = dataJson;
+    
+    // type: 1 = Order (thanh toán thành công), 2 = Agreement
+    // Nếu type = 1 và amount > 0 thì coi là thành công
+    const isSuccess = callbackType === 1 && Number(amount) > 0;
     
     console.log("📦 ZaloPay callback data:", {
       app_trans_id,
       zp_trans_id,
       amount,
-      return_code,
-      status: return_code === 1 ? "SUCCESS" : "FAILED"
+      type: callbackType,
+      isSuccess,
+      status: isSuccess ? "SUCCESS" : "FAILED"
     });
 
     // Tìm payment theo transactionId
     let payment = await Payment.findOne({ provider: "ZALOPAY", transactionId: app_trans_id });
 
     if (!payment) {
+      console.log("❌ Payment not found for app_trans_id:", app_trans_id);
       result.return_code = 1;
       result.return_message = "Payment record not found";
       return res.json(result);
     }
 
+    console.log("📦 Found payment:", {
+      _id: payment._id,
+      status: payment.status,
+      transactionId: payment.transactionId,
+      billId: payment.billId
+    });
+
     // Idempotency: nếu đã SUCCESS, return success
     if (payment.status === "SUCCESS") {
+      console.log("✅ Payment already processed");
       result.return_code = 1;
       result.return_message = "Already processed";
       return res.json(result);
     }
 
-    // ZaloPay return_code = 1 là thành công
-    if (return_code === 1 && Number(amount) > 0) {
+    // ZaloPay type = 1 và amount > 0 là thành công
+    if (isSuccess) {
       console.log("✅ ZaloPay payment SUCCESS - Processing...");
       // Apply payment using shared helper (atomic) - tự động cập nhật bill status
       try {
         // Lưu returnUrl trước khi apply
         const savedReturnUrl = payment.metadata?.returnUrl;
-        await applyPaymentToBill(payment, { ...dataJson, returnUrl: savedReturnUrl });
+        await applyPaymentToBill(payment, { 
+          ...dataJson, 
+          return_code: 1, // Đảm bảo có return_code cho applyPaymentToBill
+          type: callbackType,
+          returnUrl: savedReturnUrl 
+        });
         console.log("✅ Payment applied successfully to bill");
         result.return_code = 1;
         result.return_message = "Confirm Success";
       } catch (e) {
         console.error("❌ applyPaymentToBill error (ZaloPay callback):", e);
+        console.error("❌ Error stack:", e.stack);
         result.return_code = 0;
         result.return_message = "Internal error";
       }
     } else {
-      // Mark failed
+      console.log("❌ Payment failed - type not 1 or amount <= 0");
       payment.status = "FAILED";
-      payment.metadata = { ...payment.metadata, callbackData: dataJson };
+      payment.metadata = { ...payment.metadata, callbackData: dataJson, type: callbackType };
       await payment.save();
       result.return_code = 1;
       result.return_message = "Payment failed";
     }
   } catch (ex) {
-    console.error("ZaloPay callback error:", ex);
+    console.error("❌ ZaloPay callback error:", ex);
+    console.error("❌ Error stack:", ex.stack);
     result.return_code = 0;
     result.return_message = ex.message || "Internal error";
   }
@@ -421,24 +461,12 @@ export const zaloReturn = async (req, res) => {
     if (status === "1" || status === "success") {
       console.log("✅ Payment success - checking if callback already processed...");
       
-      // Fallback: Nếu callback chưa được gọi (payment vẫn PENDING), apply payment ở đây
-      // Điều này xảy ra khi callback URL là localhost và ZaloPay không thể gọi được
+      // Fallback đã tắt - chỉ dùng callback (IPN)
+      // Nếu payment vẫn PENDING, có nghĩa là callback chưa được gọi
       if (payment.status === "PENDING") {
-        console.log("⚠️ Payment still PENDING - callback may not have been called (localhost issue)");
-        console.log("🔄 Applying payment as fallback in return handler...");
-        try {
-          const savedReturnUrl = payment.metadata?.returnUrl;
-          await applyPaymentToBill(payment, { 
-            ...req.query, 
-            returnUrl: savedReturnUrl,
-            source: "zaloReturn_fallback" 
-          });
-          console.log("✅ Payment applied successfully in return handler");
-        } catch (e) {
-          console.error("❌ applyPaymentToBill error (ZaloPay return fallback):", e);
-          // Vẫn redirect về frontend để user biết thanh toán thành công
-          // Admin có thể check và apply manually nếu cần
-        }
+        console.log("⚠️ Payment still PENDING - callback may not have been called yet");
+        console.log("ℹ️ Fallback is disabled - waiting for callback to process payment");
+        // Không apply payment ở đây, đợi callback xử lý
       } else if (payment.status === "SUCCESS") {
         console.log("✅ Payment already processed by callback");
       }
