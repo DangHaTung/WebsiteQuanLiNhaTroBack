@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 const { Schema } = mongoose;
 
 const ROOM_TYPES = ["SINGLE", "DOUBLE", "DORM"];
-const ROOM_STATUS = ["AVAILABLE", "OCCUPIED", "MAINTENANCE"];
+const ROOM_STATUS = ["AVAILABLE", "DEPOSITED", "OCCUPIED", "MAINTENANCE"]; // DEPOSITED: đã được cọc
 const CLEANING_STATUS = ["uncleaned", "cleaned"];
 
 const currentContractSummarySchema = new Schema(
@@ -50,6 +50,10 @@ const roomSchema = new Schema(
             enum: ROOM_STATUS,
             default: "AVAILABLE",
             index: true,
+        },
+        occupantCount: {
+            type: Number,
+            default: 0,
         },
         images: [
             {

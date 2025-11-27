@@ -63,8 +63,19 @@ export const getMyBills = async (req, res) => {
     // Lấy tất cả contractIds và finalContractIds (bao gồm co-tenant)
     const { contractIds, finalContractIds } = await getUserContractIds(userId);
 
-    // Nếu không có contract và finalContract nào, trả về mảng rỗng
-    if (contractIds.length === 0 && finalContractIds.length === 0) {
+    // Tìm bills từ cả Contract và FinalContract, hoặc bills có tenantId = userId (RECEIPT bills)
+    const filterConditions = [];
+    if (contractIds.length > 0) {
+      filterConditions.push({ contractId: { $in: contractIds } });
+    }
+    if (finalContractIds.length > 0) {
+      filterConditions.push({ finalContractId: { $in: finalContractIds } });
+    }
+    // Thêm điều kiện lấy bills có tenantId = userId (cho RECEIPT bills)
+    filterConditions.push({ tenantId: userId });
+
+    // Nếu không có điều kiện nào, trả về mảng rỗng
+    if (filterConditions.length === 0) {
       return res.status(200).json({
         message: "Lấy danh sách hóa đơn thành công",
         success: true,
@@ -76,15 +87,6 @@ export const getMyBills = async (req, res) => {
           limit: parseInt(limit),
         },
       });
-    }
-
-    // Tìm bills từ cả Contract và FinalContract
-    const filterConditions = [];
-    if (contractIds.length > 0) {
-      filterConditions.push({ contractId: { $in: contractIds } });
-    }
-    if (finalContractIds.length > 0) {
-      filterConditions.push({ finalContractId: { $in: finalContractIds } });
     }
 
     let filter = filterConditions.length > 1 
@@ -362,8 +364,56 @@ export const confirmCashReceipt = async (req, res) => {
 
     await bill.save();
 
-    // KHÔNG tự động complete checkin cho tiền mặt - cần admin click "Hoàn thành" riêng
-    console.log(`✅ [CASH CONFIRM] Bill ${bill._id} confirmed as PAID - Checkin requires manual completion`);
+    // Tự động complete checkin và cập nhật room status nếu là bill RECEIPT đã PAID
+    if (bill.billType === "RECEIPT" && bill.status === "PAID") {
+      const Checkin = (await import("../models/checkin.model.js")).default;
+      const Room = (await import("../models/room.model.js")).default;
+      const checkin = await Checkin.findOne({ receiptBillId: bill._id }).populate("roomId");
+      if (checkin && checkin.status === "CREATED") {
+        checkin.status = "COMPLETED";
+        checkin.receiptPaidAt = new Date(); // Lưu thời điểm thanh toán phiếu thu
+        await checkin.save();
+        console.log(`✅ [CASH CONFIRM] Auto-completed checkin ${checkin._id} after cash payment confirmation, receiptPaidAt: ${checkin.receiptPaidAt}`);
+        
+        // Cập nhật room status = DEPOSITED, occupantCount = 0
+        if (checkin.roomId) {
+          const room = await Room.findById(checkin.roomId._id || checkin.roomId);
+          if (room) {
+            room.status = "DEPOSITED";
+            room.occupantCount = 0; // Chưa vào ở
+            await room.save();
+            console.log(`✅ [CASH CONFIRM] Updated room ${room._id} status to DEPOSITED`);
+          }
+        }
+        
+        // Tự động tạo account và gửi email
+        try {
+          const { autoCreateAccountAndSendEmail } = await import("../services/user/autoCreateAccount.service.js");
+          await autoCreateAccountAndSendEmail(checkin);
+          console.log(`✅ Auto-created account and sent email for checkin ${checkin._id}`);
+        } catch (emailErr) {
+          console.error(`❌ Failed to create account/send email for checkin ${checkin._id}:`, emailErr);
+          // Không throw error để không block payment flow
+        }
+      }
+    }
+    
+    // Cập nhật room status = OCCUPIED và occupantCount khi thanh toán CONTRACT bill
+    if (bill.billType === "CONTRACT" && bill.status === "PAID" && bill.contractId) {
+      const Room = (await import("../models/room.model.js")).default;
+      const Contract = (await import("../models/contract.model.js")).default;
+      const contract = await Contract.findById(bill.contractId).populate("roomId");
+      if (contract && contract.roomId) {
+        const room = await Room.findById(contract.roomId._id || contract.roomId);
+        if (room) {
+          room.status = "OCCUPIED";
+          const occupantCount = contract.coTenants?.length ? contract.coTenants.length + 1 : 1;
+          room.occupantCount = occupantCount;
+          await room.save();
+          console.log(`✅ [CASH CONFIRM] Updated room ${room._id} status to OCCUPIED, occupantCount: ${occupantCount}`);
+        }
+      }
+    }
 
     return res.status(200).json({ success: true, message: "Xác nhận tiền mặt thành công", data: formatBill(bill) });
   } catch (err) {

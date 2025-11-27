@@ -42,6 +42,12 @@ const checkinSchema = new Schema(
       note: { type: String },
     },
 
+    // Ảnh CCCD/CMND
+    cccdImages: {
+      front: fileSchema, // Ảnh mặt trước
+      back: fileSchema,  // Ảnh mặt sau
+    },
+
     notes: { type: String },
     attachments: [fileSchema],
 
@@ -52,6 +58,9 @@ const checkinSchema = new Schema(
 
     // Xử lý tiền cọc khi hủy: FORFEIT (mất cọc), APPLIED (áp vào quyết toán), REFUNDED (hoàn cọc)
     depositDisposition: { type: String, enum: ["FORFEIT", "APPLIED", "REFUNDED"], default: undefined },
+
+    // Thời điểm thanh toán phiếu thu (để tính thời hạn 3 ngày)
+    receiptPaidAt: { type: Date },
   },
   { timestamps: { createdAt: true, updatedAt: false }, versionKey: false }
 );

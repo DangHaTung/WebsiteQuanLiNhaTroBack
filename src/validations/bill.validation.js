@@ -146,6 +146,13 @@ export const createBillSchema = Joi.object({
     .messages({
       'string.max': 'Note không được vượt quá 500 ký tự',
     }),
+
+  tenantId: Joi.string()
+    .pattern(/^[0-9a-fA-F]{24}$/)
+    .optional()
+    .messages({
+      'string.pattern.base': 'TenantId phải là ObjectId hợp lệ',
+    }),
 });
 
 // Schema cho cập nhật bill
@@ -268,6 +275,13 @@ export const updateBillSchema = Joi.object({
     .optional()
     .messages({
       'string.max': 'Note không được vượt quá 500 ký tự',
+    }),
+
+  tenantId: Joi.string()
+    .pattern(/^[0-9a-fA-F]{24}$/)
+    .optional()
+    .messages({
+      'string.pattern.base': 'TenantId phải là ObjectId hợp lệ',
     }),
 })
   .min(1)

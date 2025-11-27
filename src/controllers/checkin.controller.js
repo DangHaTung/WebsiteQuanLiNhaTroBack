@@ -33,19 +33,18 @@ export const createCashCheckin = async (req, res) => {
       duration,
       deposit,
       notes,
-      // Khách xem phòng trực tiếp (không có tài khoản) → snapshot
-      fullName,
-      phone,
-      email,
       identityNo,
-      address,
-      tenantNote,
- 
+      // Nếu đã có tài khoản thì gửi kèm tenantId
       tenantId,
     } = req.body || {};
 
     if (!roomId || !checkinDate || !duration || deposit === undefined) {
       return res.status(400).json({ success: false, message: "roomId, checkinDate, duration, deposit are required" });
+    }
+
+    // Kiểm tra upload ảnh CCCD
+    if (!req.files || !req.files.cccdFront || !req.files.cccdBack) {
+      return res.status(400).json({ success: false, message: "Vui lòng upload đầy đủ ảnh CCCD mặt trước và mặt sau" });
     }
 
     const room = await Room.findById(roomId);
@@ -55,7 +54,30 @@ export const createCashCheckin = async (req, res) => {
     const endDate = addMonths(startDate, duration);
     const monthlyRent = Number(room.pricePerMonth || 0);
 
-   
+    // Xử lý ảnh CCCD
+    const cccdFrontFile = Array.isArray(req.files.cccdFront) ? req.files.cccdFront[0] : req.files.cccdFront;
+    const cccdBackFile = Array.isArray(req.files.cccdBack) ? req.files.cccdBack[0] : req.files.cccdBack;
+
+    const cccdImages = {
+      front: {
+        url: cccdFrontFile.path,
+        secure_url: cccdFrontFile.secure_url || cccdFrontFile.path,
+        public_id: cccdFrontFile.filename,
+        resource_type: cccdFrontFile.resource_type || "image",
+        format: cccdFrontFile.format,
+        bytes: cccdFrontFile.size,
+      },
+      back: {
+        url: cccdBackFile.path,
+        secure_url: cccdBackFile.secure_url || cccdBackFile.path,
+        public_id: cccdBackFile.filename,
+        resource_type: cccdBackFile.resource_type || "image",
+        format: cccdBackFile.format,
+        bytes: cccdBackFile.size,
+      },
+    };
+
+    // 1) Ghi nhận bản ghi Checkin trước — nguồn dữ liệu gốc cho thông tin khách
     const checkinRecord = await Checkin.create({
       tenantId: tenantId || undefined,
       staffId: user._id,
@@ -65,13 +87,9 @@ export const createCashCheckin = async (req, res) => {
       deposit: toDec(deposit),
       monthlyRent: toDec(monthlyRent),
       tenantSnapshot: {
-        fullName,
-        phone,
-        email,
-        identityNo,
-        address,
-        note: tenantNote,
+        identityNo: identityNo || "",
       },
+      cccdImages,
       notes,
       status: "CREATED",
     });
@@ -89,7 +107,7 @@ export const createCashCheckin = async (req, res) => {
         monthlyRent: toDec(monthlyRent),
         deposit: toDec(deposit),
       },
-      tenantSnapshot: checkinRecord.tenantSnapshot,
+      tenantSnapshot: checkinRecord.tenantSnapshot || {},
     };
     if (tenantId) {
       contractPayload.tenantId = tenantId;
@@ -106,7 +124,7 @@ export const createCashCheckin = async (req, res) => {
       },
     ];
 
-    const receiptBill = await Bill.create({
+    const receiptBillPayload = {
       contractId: contract._id,
       billingDate: new Date(),
       billType: "RECEIPT",
@@ -116,7 +134,12 @@ export const createCashCheckin = async (req, res) => {
       amountPaid: toDec(0),
       payments: [],
       note: notes,
-    });
+    };
+    // Thêm tenantId vào receiptBill nếu có
+    if (tenantId) {
+      receiptBillPayload.tenantId = tenantId;
+    }
+    const receiptBill = await Bill.create(receiptBillPayload);
 
     // 3) Cập nhật Checkin để liên kết contractId
     checkinRecord.contractId = contract._id;
@@ -153,17 +176,17 @@ export const createOnlineCheckin = async (req, res) => {
       duration,
       deposit,
       notes,
-      fullName,
-      phone,
-      email,
       identityNo,
-      address,
-      tenantNote,
       tenantId,
     } = req.body || {};
 
     if (!roomId || !checkinDate || !duration || deposit === undefined) {
       return res.status(400).json({ success: false, message: "roomId, checkinDate, duration, deposit are required" });
+    }
+
+    // Kiểm tra upload ảnh CCCD
+    if (!req.files || !req.files.cccdFront || !req.files.cccdBack) {
+      return res.status(400).json({ success: false, message: "Vui lòng upload đầy đủ ảnh CCCD mặt trước và mặt sau" });
     }
 
     const room = await Room.findById(roomId);
@@ -173,6 +196,29 @@ export const createOnlineCheckin = async (req, res) => {
     const endDate = addMonths(startDate, duration);
     const monthlyRent = Number(room.pricePerMonth || 0);
 
+    // Xử lý ảnh CCCD
+    const cccdFrontFile = Array.isArray(req.files.cccdFront) ? req.files.cccdFront[0] : req.files.cccdFront;
+    const cccdBackFile = Array.isArray(req.files.cccdBack) ? req.files.cccdBack[0] : req.files.cccdBack;
+
+    const cccdImages = {
+      front: {
+        url: cccdFrontFile.path,
+        secure_url: cccdFrontFile.secure_url || cccdFrontFile.path,
+        public_id: cccdFrontFile.filename,
+        resource_type: cccdFrontFile.resource_type || "image",
+        format: cccdFrontFile.format,
+        bytes: cccdFrontFile.size,
+      },
+      back: {
+        url: cccdBackFile.path,
+        secure_url: cccdBackFile.secure_url || cccdBackFile.path,
+        public_id: cccdBackFile.filename,
+        resource_type: cccdBackFile.resource_type || "image",
+        format: cccdBackFile.format,
+        bytes: cccdBackFile.size,
+      },
+    };
+
     const checkinRecord = await Checkin.create({
       tenantId: tenantId || undefined,
       staffId: user._id,
@@ -181,7 +227,10 @@ export const createOnlineCheckin = async (req, res) => {
       durationMonths: Number(duration),
       deposit: toDec(deposit),
       monthlyRent: toDec(monthlyRent),
-      tenantSnapshot: { fullName, phone, email, identityNo, address, note: tenantNote },
+      tenantSnapshot: {
+        identityNo: identityNo || "",
+      },
+      cccdImages,
       notes,
       status: "CREATED",
     });
@@ -198,16 +247,16 @@ export const createOnlineCheckin = async (req, res) => {
         monthlyRent: toDec(monthlyRent),
         deposit: toDec(deposit),
       },
-      tenantSnapshot: checkinRecord.tenantSnapshot,
+      tenantSnapshot: checkinRecord.tenantSnapshot || {},
     };
     if (tenantId) contractPayload.tenantId = tenantId;
     const contract = await Contract.create(contractPayload);
 
-    const receiptBill = await Bill.create({
+    const receiptBillPayload = {
       contractId: contract._id,
       billingDate: new Date(),
       billType: "RECEIPT",
-      status: "UNPAID",
+      status: "UNPAID", // Mới tạo là "Chờ thanh toán", chỉ chuyển sang PENDING_CASH_CONFIRM khi khách yêu cầu thanh toán tiền mặt
       lineItems: [
         { item: "Đặt cọc", quantity: 1, unitPrice: toDec(deposit), lineTotal: toDec(deposit) },
       ],
@@ -215,7 +264,12 @@ export const createOnlineCheckin = async (req, res) => {
       amountPaid: toDec(0),
       payments: [],
       note: notes,
-    });
+    };
+    // Thêm tenantId vào receiptBill nếu có
+    if (tenantId) {
+      receiptBillPayload.tenantId = tenantId;
+    }
+    const receiptBill = await Bill.create(receiptBillPayload);
 
     checkinRecord.contractId = contract._id;
     checkinRecord.receiptBillId = receiptBill._id;
@@ -235,35 +289,18 @@ export const createOnlineCheckin = async (req, res) => {
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
     const paymentUrl = `${frontendUrl}/public/payment/${receiptBill._id}/${token}`;
 
-    // Send email with payment link
-    const tenantEmail = email;
-    const tenantName = fullName;
-    const roomNumber = room.roomNumber;
-
-    if (tenantEmail) {
-      const { sendPaymentLinkEmail } = await import("../services/email/notification.service.js");
-      await sendPaymentLinkEmail({
-        to: tenantEmail,
-        fullName: tenantName,
-        paymentUrl,
-        billId: receiptBill._id.toString(),
-        amount: Number(deposit),
-        roomNumber,
-        expiresAt,
-      });
-      console.log(`📧 Sent payment link email to ${tenantEmail}`);
-    }
+    // Note: Email sẽ được gửi sau khi có thông tin từ tenantId hoặc admin có thể generate link sau
+    // Không gửi email tự động nữa vì không có thông tin email trong form
 
     return res.status(201).json({
       success: true,
-      message: "Tạo hợp đồng tạm và bill phiếu thu (ONLINE) thành công. Email đã được gửi.",
+      message: "Tạo hợp đồng tạm và bill phiếu thu (ONLINE) thành công.",
       data: {
         checkinId: checkinRecord._id,
         contractId: contract._id,
         receiptBillId: receiptBill._id,
         paymentUrl,
         paymentToken: token,
-        emailSent: !!tenantEmail,
       },
     });
   } catch (err) {
@@ -374,22 +411,16 @@ export const cancelCheckin = async (req, res) => {
     const checkin = await Checkin.findById(id);
     if (!checkin) return res.status(404).json({ success: false, message: "Checkin not found" });
 
-    // Yêu cầu đã có phiếu thu đặt cọc
-    if (!checkin.receiptBillId) {
-      return res.status(400).json({ success: false, message: "Chưa có bill phiếu thu đặt cọc để xử lý hủy" });
-    }
+    // Bỏ validate - có thể hủy bất cứ lúc nào (kể cả chưa thanh toán)
+    // Nếu đã thanh toán thì mất 100% cọc, nếu chưa thanh toán thì không có gì để mất
+    const receipt = checkin.receiptBillId ? await Bill.findById(checkin.receiptBillId) : null;
 
-    const receipt = await Bill.findById(checkin.receiptBillId);
-    if (!receipt) return res.status(404).json({ success: false, message: "Receipt bill not found" });
-
-    // Chính sách: nếu chưa thanh toán cọc, không có khoản để mất; báo lỗi
-    if (receipt.status !== "PAID") {
-      return res.status(400).json({ success: false, message: "Phiếu thu đặt cọc chưa thanh toán — không thể áp dụng mất cọc" });
-    }
-
-    // Đánh dấu check-in hủy và mất cọc 100%
+    // Đánh dấu check-in hủy
     checkin.status = "CANCELED";
+    // Nếu đã thanh toán thì mất 100% cọc
+    if (receipt && receipt.status === "PAID") {
     checkin.depositDisposition = "FORFEIT";
+    }
     if (reason) {
       checkin.notes = [checkin.notes, `Cancel reason: ${reason}`].filter(Boolean).join("\n");
     }
