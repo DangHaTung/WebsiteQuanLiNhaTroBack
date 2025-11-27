@@ -7,10 +7,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
+// Load environment variables from .env file
 
 console.log("=".repeat(60));
 console.log("📧 TEST EMAIL SENDING");
 console.log("=".repeat(60));
+// Display email configuration (mask password)
 
 console.log("\n📋 Email Config:");
 console.log("EMAIL_HOST:", process.env.EMAIL_HOST);
