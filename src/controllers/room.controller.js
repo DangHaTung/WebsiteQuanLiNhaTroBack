@@ -177,6 +177,130 @@ export const getRoomById = async (req, res) => {
 
         formattedRoom.utilities = utils.map(formatUtil);
 
+        // Lấy phiếu thu (checkins) liên quan đến phòng này
+        const Checkin = (await import("../models/checkin.model.js")).default;
+        const checkins = await Checkin.find({ roomId: id })
+            .populate("tenantId", "fullName email phone")
+            .populate("staffId", "fullName email")
+            .populate("receiptBillId")
+            .populate("contractId")
+            .sort({ createdAt: -1 });
+
+        // Format checkins
+        const formatCheckin = (checkin) => {
+            const obj = checkin.toObject ? checkin.toObject() : checkin;
+            return {
+                _id: obj._id,
+                tenantId: obj.tenantId,
+                staffId: obj.staffId,
+                roomId: obj.roomId,
+                contractId: obj.contractId,
+                receiptBillId: obj.receiptBillId,
+                checkinDate: obj.checkinDate,
+                durationMonths: obj.durationMonths,
+                deposit: convertDecimal128(obj.deposit),
+                monthlyRent: convertDecimal128(obj.monthlyRent),
+                tenantSnapshot: obj.tenantSnapshot,
+                cccdImages: obj.cccdImages,
+                notes: obj.notes,
+                attachments: obj.attachments,
+                status: obj.status,
+                depositDisposition: obj.depositDisposition,
+                receiptPaidAt: obj.receiptPaidAt,
+                createdAt: obj.createdAt,
+                updatedAt: obj.updatedAt,
+            };
+        };
+
+        formattedRoom.checkins = checkins.map(formatCheckin);
+
+        // Lấy hợp đồng (contracts) liên quan đến phòng này
+        const Contract = (await import("../models/contract.model.js")).default;
+        const contracts = await Contract.find({ roomId: id })
+            .populate("tenantId", "fullName email phone")
+            .sort({ createdAt: -1 });
+
+        // Format contracts
+        const formatContract = (contract) => {
+            const obj = contract.toObject ? contract.toObject() : contract;
+            return {
+                _id: obj._id,
+                tenantId: obj.tenantId,
+                roomId: obj.roomId,
+                startDate: obj.startDate,
+                endDate: obj.endDate,
+                deposit: convertDecimal128(obj.deposit),
+                monthlyRent: convertDecimal128(obj.monthlyRent),
+                status: obj.status,
+                pricingSnapshot: obj.pricingSnapshot,
+                tenantSnapshot: obj.tenantSnapshot,
+                depositRefunded: obj.depositRefunded,
+                depositRefund: obj.depositRefund,
+                coTenants: obj.coTenants,
+                createdAt: obj.createdAt,
+                updatedAt: obj.updatedAt,
+            };
+        };
+
+        formattedRoom.contracts = contracts.map(formatContract);
+
+        // Lấy hóa đơn (bills) liên quan đến phòng này (qua contracts)
+        const Bill = (await import("../models/bill.model.js")).default;
+        const contractIds = contracts.map(c => c._id);
+        const bills = await Bill.find({ 
+            contractId: { $in: contractIds }
+        })
+            .populate("contractId")
+            .sort({ createdAt: -1 });
+
+        // Format bills
+        const formatBill = (bill) => {
+            const obj = bill.toObject ? bill.toObject() : bill;
+            return {
+                _id: obj._id,
+                contractId: obj.contractId,
+                billingDate: obj.billingDate,
+                billType: obj.billType,
+                status: obj.status,
+                lineItems: obj.lineItems?.map(item => {
+                    const plainItem = item.toObject ? item.toObject() : item;
+                    return {
+                        ...plainItem,
+                        unitPrice: convertDecimal128(plainItem.unitPrice),
+                        lineTotal: convertDecimal128(plainItem.lineTotal),
+                    };
+                }) || [],
+                amountDue: convertDecimal128(obj.amountDue),
+                amountPaid: convertDecimal128(obj.amountPaid),
+                payments: obj.payments?.map(payment => ({
+                    ...payment,
+                    amount: convertDecimal128(payment.amount),
+                })) || [],
+                note: obj.note,
+                createdAt: obj.createdAt,
+                updatedAt: obj.updatedAt,
+            };
+        };
+
+        formattedRoom.bills = bills.map(formatBill);
+
+        // Lấy hóa đơn phiếu thu (receipt bills) từ checkins
+        const receiptBillIds = checkins
+            .filter(c => c.receiptBillId)
+            .map(c => c.receiptBillId);
+        
+        if (receiptBillIds.length > 0) {
+            const receiptBills = await Bill.find({ 
+                _id: { $in: receiptBillIds }
+            })
+                .populate("contractId")
+                .sort({ createdAt: -1 });
+            
+            formattedRoom.receiptBills = receiptBills.map(formatBill);
+        } else {
+            formattedRoom.receiptBills = [];
+        }
+
         res.status(200).json({
             message: "Lấy thông tin phòng thành công",
             success: true,
