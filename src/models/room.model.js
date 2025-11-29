@@ -7,6 +7,7 @@ const ROOM_TYPES = ["SINGLE", "DOUBLE", "DORM"];
 const ROOM_STATUS = ["AVAILABLE", "DEPOSITED", "OCCUPIED", "MAINTENANCE"]; // DEPOSITED: đã được cọc
 const CLEANING_STATUS = ["uncleaned", "cleaned"];
 
+// Schema tóm tắt hợp đồng hiện tại (không tạo _id riêng)
 const currentContractSummarySchema = new Schema(
     {
         contractId: { type: Schema.Types.ObjectId, ref: "Contract" },
@@ -18,6 +19,7 @@ const currentContractSummarySchema = new Schema(
     { _id: false }
 );
 
+// Schema phòng
 const roomSchema = new Schema(
     {
         roomNumber: {
@@ -79,29 +81,31 @@ const roomSchema = new Schema(
     }
 );
 
-// Pre-save middleware to handle price increase when room is cleaned
+// Middleware chạy trước khi lưu (pre-save)
+// Khi trạng thái vệ sinh chuyển sang "cleaned", tự động tăng giá thêm 200,000 VNĐ
 roomSchema.pre("save", function (next) {
     if (this.isModified("cleaningStatus") && this.cleaningStatus === "cleaned") {
-        // Increase price by 200,000 VND when room is cleaned
+        // Lấy giá hiện tại
         const currentPrice = parseFloat(this.pricePerMonth.toString());
+        // Tăng thêm 200k
         this.pricePerMonth = currentPrice + 200000;
     }
     next();
 });
 
-// Instance method to get all utilities for this room
+// Lấy tất cả utilities (tiện ích) của phòng này
 roomSchema.methods.getUtilities = async function() {
     const Util = mongoose.model("Util");
     return await Util.findByRoom(this._id);
 };
 
-// Instance method to get utilities by condition
+// Lấy tiện ích theo điều kiện (vd: broken, good,...)
 roomSchema.methods.getUtilitiesByCondition = async function(condition) {
     const Util = mongoose.model("Util");
     return await Util.find({ room: this._id, condition, isActive: true });
 };
 
-// Instance method to add a utility to this room
+// Thêm tiện ích mới vào phòng
 roomSchema.methods.addUtility = async function(utilityData) {
     const Util = mongoose.model("Util");
     return await Util.create({
@@ -110,20 +114,23 @@ roomSchema.methods.addUtility = async function(utilityData) {
     });
 };
 
-// Instance method to get broken utilities for this room
+// Lấy danh sách tiện ích bị hỏng của phòng
 roomSchema.methods.getBrokenUtilities = async function() {
     const Util = mongoose.model("Util");
     return await Util.find({ room: this._id, condition: "broken", isActive: true });
 };
 
-// Static method to find rooms with specific utility
+// Tìm các phòng có tiện ích cụ thể
+// Ví dụ: findByUtility("Air Conditioner", "broken");
 roomSchema.statics.findByUtility = async function(utilityName, condition = null) {
     const Util = mongoose.model("Util");
     const query = { name: utilityName, isActive: true };
     if (condition) {
         query.condition = condition;
     }
+    // Lấy tiện ích và populate lấy phòng tương ứng
     const utilities = await Util.find(query).populate("room");
+    // Trả về danh sách phòng, loại bỏ null
     return utilities.map(util => util.room).filter(room => room != null);
 };
 
