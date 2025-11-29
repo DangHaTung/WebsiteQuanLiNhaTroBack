@@ -7,7 +7,8 @@ const ROOM_TYPES = ["SINGLE", "DOUBLE", "DORM"];
 const ROOM_STATUS = ["AVAILABLE", "DEPOSITED", "OCCUPIED", "MAINTENANCE"]; // DEPOSITED: đã được cọc
 const CLEANING_STATUS = ["uncleaned", "cleaned"];
 
-// Schema tóm tắt hợp đồng hiện tại (không tạo _id riêng)
+// Schema tóm tắt hợp đồng hiện tại (không có _id)
+// Dùng để tránh populate nặng, chỉ lưu thông tin cần thiết
 const currentContractSummarySchema = new Schema(
     {
         contractId: { type: Schema.Types.ObjectId, ref: "Contract" },
@@ -19,7 +20,7 @@ const currentContractSummarySchema = new Schema(
     { _id: false }
 );
 
-// Schema phòng
+// Schema chính của Room
 const roomSchema = new Schema(
     {
         roomNumber: {
@@ -81,8 +82,8 @@ const roomSchema = new Schema(
     }
 );
 
-// Middleware chạy trước khi lưu (pre-save)
-// Khi trạng thái vệ sinh chuyển sang "cleaned", tự động tăng giá thêm 200,000 VNĐ
+// PRE-SAVE MIDDLEWARE
+// Tự động tăng giá thêm 200.000 VND khi phòng chuyển trạng thái "cleaned"
 roomSchema.pre("save", function (next) {
     if (this.isModified("cleaningStatus") && this.cleaningStatus === "cleaned") {
         // Lấy giá hiện tại
@@ -93,13 +94,13 @@ roomSchema.pre("save", function (next) {
     next();
 });
 
-// Lấy tất cả utilities (tiện ích) của phòng này
+// Lấy toàn bộ tiện ích của phòng
 roomSchema.methods.getUtilities = async function() {
     const Util = mongoose.model("Util");
     return await Util.findByRoom(this._id);
 };
 
-// Lấy tiện ích theo điều kiện (vd: broken, good,...)
+// Lấy tiện ích theo tình trạng (ví dụ: "broken", "working")
 roomSchema.methods.getUtilitiesByCondition = async function(condition) {
     const Util = mongoose.model("Util");
     return await Util.find({ room: this._id, condition, isActive: true });
@@ -120,8 +121,7 @@ roomSchema.methods.getBrokenUtilities = async function() {
     return await Util.find({ room: this._id, condition: "broken", isActive: true });
 };
 
-// Tìm các phòng có tiện ích cụ thể
-// Ví dụ: findByUtility("Air Conditioner", "broken");
+// Tìm phòng theo tiện ích (vd: phòng có máy lạnh bị hỏng)
 roomSchema.statics.findByUtility = async function(utilityName, condition = null) {
     const Util = mongoose.model("Util");
     const query = { name: utilityName, isActive: true };

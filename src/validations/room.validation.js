@@ -89,7 +89,7 @@ export const createRoomSchema = Joi.object({
   */
   currentContractSummary: Joi.object({
     contractId: Joi.string()
-      .pattern(/^[0-9a-fA-F]{24}$/)
+      .pattern(/^[0-9a-fA-F]{24}$/) // Validate ObjectId
       .optional()
       .messages({
         'string.pattern.base': 'ContractId phải là ObjectId hợp lệ',
@@ -109,7 +109,7 @@ export const createRoomSchema = Joi.object({
       }),
     endDate: Joi.date()
       .iso()
-      .min(Joi.ref('startDate'))
+      .min(Joi.ref('startDate')) // Phải >= startDate
       .optional()
       .messages({
         'date.format': 'EndDate phải có định dạng ISO 8601',
@@ -289,6 +289,7 @@ export const setCoverBodySchema = Joi.object({
 
 // Schema cho query parameters
 export const roomQuerySchema = Joi.object({
+  // Lọc theo trạng thái
   status: Joi.string()
     .valid('AVAILABLE', 'OCCUPIED', 'MAINTENANCE')
     .optional()
@@ -296,6 +297,7 @@ export const roomQuerySchema = Joi.object({
       'any.only': 'Status phải là AVAILABLE, OCCUPIED hoặc MAINTENANCE',
     }),
 
+  // Lọc theo loại phòng
   type: Joi.string()
     .valid('SINGLE', 'DOUBLE', 'DORM')
     .optional()
@@ -303,6 +305,7 @@ export const roomQuerySchema = Joi.object({
       'any.only': 'Type phải là SINGLE, DOUBLE hoặc DORM',
     }),
 
+  // Tìm kiếm theo từ khóa 
   q: Joi.string()
     .trim()
     .max(100)
@@ -311,6 +314,7 @@ export const roomQuerySchema = Joi.object({
       'string.max': 'Query không được vượt quá 100 ký tự',
     }),
 
+  // Phân trang – page number
   page: Joi.number()
     .integer()
     .min(1)
@@ -321,6 +325,7 @@ export const roomQuerySchema = Joi.object({
       'number.min': 'Page phải lớn hơn hoặc bằng 1',
     }),
 
+  // Giới hạn số phần tử trả về mỗi trang
   limit: Joi.number()
     .integer()
     .min(1)
