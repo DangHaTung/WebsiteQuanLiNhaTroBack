@@ -675,8 +675,12 @@ export const publishDraftBill = async (req, res) => {
 };
 
 /**
- * Phát hành nhiều bills cùng lúc
- * POST /api/bills/publish-batch
+ * publishBatchDraftBills
+ * ----------------
+ * Phát hành nhiều bill cùng lúc
+ * Input: mảng billIds
+ * Output: mảng bill đã publish
+ * Quyền hạn: admin
  */
 export const publishBatchDraftBills = async (req, res) => {
   try {
@@ -1074,7 +1078,15 @@ export const confirmCashPayment = async (req, res) => {
   }
 };
 
-// Tính toán phí dịch vụ tháng cuối (cho hoàn cọc)
+/**
+ * calculateMonthlyFees
+ * ----------------
+ * Tính phí dịch vụ cuối tháng cho room
+ * Input: roomId, tháng/năm
+ * Output: giá trị phí
+ * Quyền hạn: admin
+ * Lưu ý: sử dụng cho generate bill hàng tháng
+ */
 export const calculateMonthlyFees = async (req, res) => {
   try {
     const { roomId, electricityKwh = 0, waterM3 = 0, occupantCount = 1, excludeRent = false } = req.body;
@@ -1110,7 +1122,14 @@ export const calculateMonthlyFees = async (req, res) => {
   }
 };
 
-// Generate payment link for bill (admin only)
+/**
+ * generatePaymentLink
+ * ----------------
+ * Tạo link thanh toán online cho bill RECEIPT
+ * Input: billId
+ * Output: URL thanh toán
+ * Quyền hạn: tenant
+ */
 export const generatePaymentLink = async (req, res) => {
   try {
     const billId = req.params.id || req.params.billId; // Support both :id and :billId
