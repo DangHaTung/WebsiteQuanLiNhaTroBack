@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 const { Schema } = mongoose;
 
+// Schema cho file (ảnh, tài liệu, v.v.)
 const fileSchema = new Schema(
   {
     url: { type: String },
@@ -11,28 +12,36 @@ const fileSchema = new Schema(
     format: { type: String },
     bytes: { type: Number },
   },
-  { _id: false }
+  { _id: false } // Không tạo _id riêng cho subdocument này
 );
 
+// Schema chính cho Checkin
 const checkinSchema = new Schema(
   {
     // Optional liên kết tới User nếu có tài khoản
     tenantId: { type: Schema.Types.ObjectId, ref: "User" },
+    // User thực hiện check-in (bắt buộc)
     staffId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    // Phòng được check-in (bắt buộc)
     roomId: { type: Schema.Types.ObjectId, ref: "Room", required: true },
+    // Hợp đồng tạm hoặc chính thức liên quan (nếu đã tạo)
     contractId: { type: Schema.Types.ObjectId, ref: "Contract" },
     finalContractId: { type: Schema.Types.ObjectId, ref: "FinalContract" },
 
-    // Liên kết tới bill phiếu thu (RECEIPT)
+    // Liên kết tới phiếu thu tiền mặt (RECEIPT)
     receiptBillId: { type: Schema.Types.ObjectId, ref: "Bill" },
 
+    // Ngày bắt đầu check-in
     checkinDate: { type: Date, required: true },
+
+    // Thời gian thuê theo tháng
     durationMonths: { type: Number, required: true },
 
+    // Tiền cọc & giá thuê hàng tháng
     deposit: { type: mongoose.Schema.Types.Decimal128 },
     monthlyRent: { type: mongoose.Schema.Types.Decimal128 },
 
-    // Ảnh chụp thông tin người thuê tại thời điểm check-in (không cần tài khoản)
+    // Thông tin tenant tại thời điểm check-in (snapshot)
     tenantSnapshot: {
       fullName: { type: String },
       phone: { type: String },
@@ -48,6 +57,7 @@ const checkinSchema = new Schema(
       back: fileSchema,  // Ảnh mặt sau
     },
 
+    // Ghi chú chung
     notes: { type: String },
     attachments: [fileSchema],
 
