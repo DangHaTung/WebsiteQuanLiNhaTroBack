@@ -93,12 +93,27 @@ export const getRoomFees = async (req, res) => {
   }
 };
 
-// Calculate fees for a room
-// Electricity: tiered kWh + VAT
-// Parking: baseRate * vehicleCount
-// Water: baseRate * occupantCount (tính theo số người)
-// Internet: flat baseRate per room
-// Cleaning: baseRate * occupantCount
+/**
+ * calculateRoomFees
+ * -------------------
+ * Tính tổng phí của phòng theo từng loại
+ * Input:
+ *  - req.params.roomId: ID phòng
+ *  - req.body:
+ *      - kwh: số điện tiêu thụ
+ *      - occupantCount: số người ở (tính water, cleaning)
+ *      - vehicleCount: số xe (tính parking)
+ * Output:
+ *  - object { roomId, breakdown: [...], total }
+ *      breakdown: chi tiết từng loại phí (baseRate, subtotal, vat, total, số lượng)
+ * Quyền hạn: admin
+ * Lưu ý:
+ *  - Electricity: dùng tiers từ DB nếu có, nếu không dùng DEFAULT_ELECTRICITY_TIERS
+ *  - Water/cleaning: nhân với occupantCount
+ *  - Internet: flat fee
+ *  - Parking: nhân với vehicleCount, luôn hiển thị trong breakdown
+ *  - Rent: lấy từ room.pricePerMonth
+ */
 export const calculateRoomFees = async (req, res) => {
   try {
     const { roomId } = req.params;
