@@ -6,6 +6,7 @@ import Bill from "../models/bill.model.js";
 import Payment from "../models/payment.model.js";
 import { applyPaymentToBill } from "../controllers/payment.controller.js";
 
+// Cấu hình ZaloPay sandbox / production
 const config = {
   app_id: 2554,
   key1: "sdngKKJmqEMzvh5QQcdD2A9XBSKUNaYn",
@@ -24,7 +25,7 @@ export const createZaloOrder = async (req, res) => {
     const { billId, returnUrl } = req.body;
     if (!billId) return res.status(400).json({ message: "Missing billId" });
 
-    // Lấy bill và populate contract với roomId và tenantId (nếu có)
+    // Lấy bill từ DB và populate thông tin hợp đồng, tenant, room
     const bill = await Bill.findById(billId).populate({
       path: "contractId",
       populate: [
@@ -46,7 +47,7 @@ export const createZaloOrder = async (req, res) => {
     console.log("Has tenantSnapshot:", !!bill.contractId.tenantSnapshot);
     console.log("tenantSnapshot data:", bill.contractId.tenantSnapshot);
 
-    // Lấy thông tin tenant từ tenantId hoặc tenantSnapshot
+    // Xác định thông tin tenant ưu tiên từ tenantId, nếu không có lấy từ tenantSnapshot
     let tenantInfo = null;
     
     // Ưu tiên lấy từ tenantId nếu có
@@ -76,14 +77,14 @@ export const createZaloOrder = async (req, res) => {
         .json({ message: "Không tìm thấy thông tin người thuê" });
     }
 
-    // Kiểm tra nếu bill đã thanh toán rồi
+    // Kiểm tra bill đã thanh toán chưa
     if (bill.status === "PAID") {
       return res
         .status(400)
         .json({ message: "Hóa đơn này đã được thanh toán" });
     }
 
-    // Kiểm tra xem đã có payment nào của bill này chưa
+    // Kiểm tra payment đã tồn tại cho bill này chưa
     const existingPayment = await Payment.findOne({
       billId,
       provider: "ZALOPAY",
@@ -91,12 +92,12 @@ export const createZaloOrder = async (req, res) => {
 
     if (existingPayment) {
       if (existingPayment.status === "SUCCESS") {
-        // Nếu đã thanh toán thành công rồi thì không tạo mới
+        // Nếu đã thành công thì không tạo mới
         return res
           .status(400)
           .json({ message: "Hóa đơn này đã thanh toán thành công" });
       } else if (existingPayment.status === "PENDING") {
-        // Nếu đang pending thì trả lại payment cũ với payUrl
+        // Nếu đang pending thì trả về payment cũ với payUrl
         const metadata = existingPayment.metadata || {};
         const zaloResponse = metadata.zaloResponse || metadata.zaloData || {};
         const payUrl = zaloResponse.order_url || zaloResponse.orderurl;
@@ -123,6 +124,7 @@ export const createZaloOrder = async (req, res) => {
       billId,
     };
 
+    // Item thông tin bill
     const items = [
       {
         itemid: billId,
@@ -133,6 +135,7 @@ export const createZaloOrder = async (req, res) => {
       },
     ];
 
+    // Tạo order object
     const order = {
       app_id: config.app_id,
       app_trans_id: `${moment().format("YYMMDD")}_${transID}`,
@@ -146,6 +149,7 @@ export const createZaloOrder = async (req, res) => {
       callback_url: config.callback_url,
     };
 
+    // Tạo MAC để gửi đến ZaloPay
     const data =
       config.app_id +
       "|" +
@@ -165,8 +169,10 @@ export const createZaloOrder = async (req, res) => {
 
     console.log("📤 Sending ZaloPay order:", JSON.stringify(order, null, 2));
     
+    // Gửi request tạo order đến ZaloPay
     const zaloRes = await axios.post(config.endpoint, order);
     
+    // Kiểm tra kết quả trả về
     console.log("📥 ZaloPay API Response:", JSON.stringify(zaloRes.data, null, 2));
 
     // Kiểm tra response từ ZaloPay
@@ -229,7 +235,7 @@ export const createZaloOrder = async (req, res) => {
 };
 
 // ==============================
-// Callback từ ZaloPay (IPN - nguồn chân lý)
+// Callback từ ZaloPay (IPN) - xác thực thanh toán
 // ==============================
 export const zaloCallback = async (req, res) => {
   let result = {};
@@ -243,6 +249,7 @@ export const zaloCallback = async (req, res) => {
     const reqMac = req.body.mac;
     const callbackType = req.body.type; // type: 1 = Order, 2 = Agreement
     
+    // Kiểm tra dữ liệu
     if (!dataStr) {
       console.log("❌ ZaloPay callback: Missing data");
       result.return_code = -1;
@@ -250,7 +257,7 @@ export const zaloCallback = async (req, res) => {
       return res.json(result);
     }
 
-    // Verify MAC: mac = HMAC(HmacSHA256, callback key (key2), data)
+    // Verify MAC để đảm bảo dữ liệu không bị giả mạo
     const mac = CryptoJS.HmacSHA256(dataStr, config.key2).toString();
     console.log("🔐 MAC verification:", {
       received: reqMac,
