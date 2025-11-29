@@ -2,17 +2,15 @@ import mongoose from "mongoose";
 import Bill from "../models/bill.model.js";
 import Contract from "../models/contract.model.js";
 
-/**
- * Helper convert Decimal128 sang number
- */
+// Helper convert Decimal128 sang number
+// Nếu value null/undefined trả về null, ngược lại parseFloat
 const convertDecimal128 = (value) => {
     if (value === null || value === undefined) return null;
     return parseFloat(value.toString());
 };
 
-/**
- * Chuyển đổi bill object cho frontend
- */
+// Chuyển đổi bill object sang dạng frontend-friendly
+// Decimal128 → number, lineItems + payments map sang dạng plain object
 const formatBill = (bill) => ({
     ...bill.toObject(),
     amountDue: convertDecimal128(bill.amountDue),
@@ -32,16 +30,17 @@ const formatBill = (bill) => ({
 });
 
 /**
- * Helper: Lấy tất cả contractIds và finalContractIds của user (bao gồm co-tenant)
+ * Helper: Lấy tất cả contractIds và finalContractIds của user
+ * Bao gồm cả co-tenant
  */
 const getUserContractIds = async (userId) => {
     const FinalContract = (await import("../models/finalContract.model.js")).default;
     
-    // Tìm FinalContracts
+    // Tìm tất cả FinalContracts của user
     const finalContracts = await FinalContract.find({ tenantId: userId }).select('_id');
     const finalContractIds = finalContracts.map(fc => fc._id);
     
-    // Tìm Contracts (bao gồm cả co-tenant)
+    // Tìm Contracts (bao gồm co-tenants)
     const contracts = await Contract.find({
         $or: [
             { tenantId: userId }, // User là người chính
@@ -53,7 +52,15 @@ const getUserContractIds = async (userId) => {
     return { contractIds, finalContractIds };
 };
 
-// Lấy danh sách hóa đơn của user hiện tại
+/**
+ * getMyBills
+ * ----------------
+ * Lấy danh sách hóa đơn của tenant
+ * Input: req.user._id
+ * Output: mảng hóa đơn đã format
+ * Quyền hạn: tenant
+ * Lưu ý: bao gồm hóa đơn từ hợp đồng chính và co-tenant
+ */
 export const getMyBills = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
@@ -174,7 +181,15 @@ export const getMyBills = async (req, res) => {
   }
 };
 
-// Lấy danh sách hóa đơn (admin)
+/**
+ * getAllBills
+ * ----------------
+ * Lấy tất cả hóa đơn (admin)
+ * Input: query params: filter, pagination
+ * Output: mảng hóa đơn
+ * Quyền hạn: admin
+ * Lưu ý: hỗ trợ filter theo trạng thái, tenant, room
+ */
 export const getAllBills = async (req, res) => {
   try {
     const { page = 1, limit = 10, status, billType, contractId, finalContractId } = req.query;
@@ -226,7 +241,14 @@ export const getAllBills = async (req, res) => {
   }
 };
 
-// Lấy hóa đơn theo ID
+/**
+ * getBillById
+ * ----------------
+ * Lấy chi tiết một hóa đơn
+ * Input: billId
+ * Output: chi tiết bill đã format
+ * Quyền hạn: tenant (chỉ bill của họ) hoặc admin
+ */
 export const getBillById = async (req, res) => {
   try {
     const bill = await Bill.findById(req.params.id).populate("contractId");
@@ -254,7 +276,15 @@ export const getBillById = async (req, res) => {
   }
 };
 
-// Tạo hóa đơn mới
+/**
+ * createBill
+ * ----------------
+ * Tạo một hóa đơn mới
+ * Input: req.body chứa lineItems, contractId/finalContractId, dueDate
+ * Output: bill mới
+ * Quyền hạn: admin
+ * Lưu ý: kiểm tra hợp đồng tồn tại, tính toán amountTotal
+ */
 export const createBill = async (req, res) => {
   try {
     const bill = new Bill(req.body);
@@ -278,7 +308,15 @@ export const createBill = async (req, res) => {
   }
 };
 
-// Cập nhật hóa đơn
+/**
+ * updateBill
+ * ----------------
+ * Cập nhật thông tin hóa đơn (lineItems, dueDate)
+ * Input: billId, body
+ * Output: bill đã cập nhật
+ * Quyền hạn: admin
+ * Lưu ý: không cho phép cập nhật bill đã hủy hoặc đã thanh toán
+ */
 export const updateBill = async (req, res) => {
   try {
     // Lấy hóa đơn hiện tại để kiểm tra trạng thái
