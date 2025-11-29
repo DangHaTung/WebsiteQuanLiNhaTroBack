@@ -172,6 +172,7 @@ export const createZaloOrder = async (req, res) => {
     // Gửi request tạo order đến ZaloPay
     const zaloRes = await axios.post(config.endpoint, order);
     
+    // Kiểm tra kết quả trả về
     console.log("📥 ZaloPay API Response:", JSON.stringify(zaloRes.data, null, 2));
 
     // Kiểm tra response từ ZaloPay
@@ -234,7 +235,7 @@ export const createZaloOrder = async (req, res) => {
 };
 
 // ==============================
-// Callback từ ZaloPay (IPN - nguồn chân lý)
+// Callback từ ZaloPay (IPN) - xác thực thanh toán
 // ==============================
 export const zaloCallback = async (req, res) => {
   let result = {};
@@ -248,6 +249,7 @@ export const zaloCallback = async (req, res) => {
     const reqMac = req.body.mac;
     const callbackType = req.body.type; // type: 1 = Order, 2 = Agreement
     
+    // Kiểm tra dữ liệu
     if (!dataStr) {
       console.log("❌ ZaloPay callback: Missing data");
       result.return_code = -1;
@@ -255,7 +257,7 @@ export const zaloCallback = async (req, res) => {
       return res.json(result);
     }
 
-    // Verify MAC: mac = HMAC(HmacSHA256, callback key (key2), data)
+    // Verify MAC để đảm bảo dữ liệu không bị giả mạo
     const mac = CryptoJS.HmacSHA256(dataStr, config.key2).toString();
     console.log("🔐 MAC verification:", {
       received: reqMac,
