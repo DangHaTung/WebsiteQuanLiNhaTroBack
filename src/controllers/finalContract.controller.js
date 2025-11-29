@@ -230,6 +230,13 @@ export const createFromContract = async (req, res) => {
       .populate("tenantId", "fullName email phone role")
       .populate("roomId", "roomNumber pricePerMonth");
 
+    // Cập nhật checkin để gán finalContractId
+    const Checkin = (await import("../models/checkin.model.js")).default;
+    await Checkin.updateOne(
+      { contractId: contract._id },
+      { $set: { finalContractId: finalContract._id } }
+    );
+
     return res.status(201).json({ success: true, message: "Final contract draft created", data: formatFinalContract(populated) });
   } catch (err) {
     console.error("createFromContract error:", err);

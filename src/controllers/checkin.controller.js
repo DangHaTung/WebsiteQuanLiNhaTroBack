@@ -36,6 +36,7 @@ export const createCashCheckin = async (req, res) => {
       notes,
       identityNo,
       address,
+      initialElectricReading,
       // Nếu đã có tài khoản thì gửi kèm tenantId
       tenantId,
     } = req.body || {};
@@ -103,6 +104,7 @@ export const createCashCheckin = async (req, res) => {
         phone: tenantInfo?.phone || "",
         address: address || tenantInfo?.address || "",
       },
+      initialElectricReading: initialElectricReading ? Number(initialElectricReading) : undefined,
       cccdImages,
       notes,
       status: "CREATED",
@@ -192,6 +194,7 @@ export const createOnlineCheckin = async (req, res) => {
       notes,
       identityNo,
       address,
+      initialElectricReading,
       tenantId,
     } = req.body || {};
 
@@ -257,6 +260,7 @@ export const createOnlineCheckin = async (req, res) => {
         phone: tenantInfo?.phone || "",
         address: address || tenantInfo?.address || "",
       },
+      initialElectricReading: initialElectricReading ? Number(initialElectricReading) : undefined,
       cccdImages,
       notes,
       status: "CREATED",
