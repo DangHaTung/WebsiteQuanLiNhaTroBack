@@ -252,10 +252,25 @@ export const createPayment = async (req, res) => {
         const bill = await Bill.findById(billId);
         if (!bill) return res.status(404).json({ error: "Bill not found" });
 
-        const balance = decToNumber(bill.amountDue) - decToNumber(bill.amountPaid);
+        // Với CONTRACT bill: tính lại amountDue từ lineItems để đảm bảo chính xác
+        let amountDue = decToNumber(bill.amountDue);
+        if (bill.billType === "CONTRACT" && bill.lineItems && bill.lineItems.length > 0) {
+            // Tính tổng tất cả lineItems của CONTRACT bill
+            let totalFromLineItems = 0;
+            bill.lineItems.forEach((item) => {
+                const itemTotal = decToNumber(item.lineTotal);
+                totalFromLineItems += itemTotal;
+                console.log(`📋 CONTRACT lineItem: ${item.item} = ${itemTotal}`);
+            });
+            amountDue = totalFromLineItems;
+            console.log("📋 CONTRACT bill - Recalculated amountDue from lineItems:", amountDue, "(DB amountDue:", decToNumber(bill.amountDue), ")");
+        }
+
+        const balance = amountDue - decToNumber(bill.amountPaid);
         console.log("💰 Payment validation - Amount:", amount, "Balance:", balance);
         console.log("📊 Bill details:", {
-            amountDue: decToNumber(bill.amountDue),
+            amountDue: amountDue,
+            amountDueFromDB: decToNumber(bill.amountDue),
             amountPaid: decToNumber(bill.amountPaid),
             balance,
             billType: bill.billType,

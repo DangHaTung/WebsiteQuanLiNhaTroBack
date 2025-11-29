@@ -70,6 +70,43 @@ const createPayment = async (req, res) => {
         if (!bill) return res.status(404).json({ success: false, message: "Bill không tồn tại" });
         if (bill.status === "PAID") return res.status(400).json({ success: false, message: "Bill đã được thanh toán" });
 
+        // Helper function to convert Decimal128 to number
+        const decToNumber = (dec) => {
+            if (!dec) return 0;
+            try { return parseFloat(dec.toString()); } catch (e) { return 0; }
+        };
+
+        // Với CONTRACT bill: tính lại amountDue từ lineItems để đảm bảo chính xác
+        let amountDue = decToNumber(bill.amountDue);
+        if (bill.billType === "CONTRACT" && bill.lineItems && bill.lineItems.length > 0) {
+            // Tính tổng tất cả lineItems của CONTRACT bill
+            let totalFromLineItems = 0;
+            bill.lineItems.forEach((item) => {
+                const itemTotal = decToNumber(item.lineTotal);
+                totalFromLineItems += itemTotal;
+                console.log(`📋 CONTRACT lineItem (MoMo): ${item.item} = ${itemTotal}`);
+            });
+            amountDue = totalFromLineItems;
+            console.log("📋 CONTRACT bill (MoMo) - Recalculated amountDue from lineItems:", amountDue, "(DB amountDue:", decToNumber(bill.amountDue), ")");
+        }
+
+        const balance = amountDue - decToNumber(bill.amountPaid);
+        console.log("💰 MoMo Payment validation - Amount:", amountNum, "Balance:", balance);
+        console.log("📊 MoMo Bill details:", {
+            amountDue: amountDue,
+            amountDueFromDB: decToNumber(bill.amountDue),
+            amountPaid: decToNumber(bill.amountPaid),
+            balance,
+            billType: bill.billType,
+            status: bill.status
+        });
+        
+        // Validate amount
+        if (amountNum <= 0 || amountNum > balance + 1) {
+            console.log("❌ MoMo Invalid amount - Amount must be between 0 and", balance);
+            return res.status(400).json({ success: false, message: "Số tiền không hợp lệ", amount: amountNum, balance });
+        }
+
         // validate chain: contract -> room -> tenant (optional checks kept)
         const contractId = bill.contractId || bill.contract || bill.contract_id;
         if (!contractId)
