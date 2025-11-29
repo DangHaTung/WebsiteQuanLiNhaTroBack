@@ -410,7 +410,15 @@ export const updateBill = async (req, res) => {
   }
 };
 
-// Xác nhận tiền mặt cho bill (RECEIPT hoặc CONTRACT)
+/**
+ * confirmCashReceipt
+ * ----------------
+ * Xác nhận hóa đơn tiền mặt đã nhận
+ * Input: billId
+ * Output: bill đã thanh toán
+ * Quyền hạn: admin
+ * Lưu ý: cập nhật amountPaid, trạng thái bill, tự động hoàn thành checkin nếu cần
+ */
 export const confirmCashReceipt = async (req, res) => {
   try {
     const isAdmin = req.user?.role === "ADMIN";
@@ -507,7 +515,15 @@ export const confirmCashReceipt = async (req, res) => {
 
 
 
-// Hủy hóa đơn (cancel) — chuyển trạng thái sang VOID
+/**
+ * cancelBill
+ * ----------------
+ * Hủy bill → chuyển trạng thái VOID
+ * Input: billId
+ * Output: bill đã hủy
+ * Quyền hạn: admin
+ * Lưu ý: kiểm tra trạng thái hiện tại, không hủy bill đã thanh toán đầy đủ
+ */
 export const cancelBill = async (req, res) => {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
@@ -585,8 +601,13 @@ export const getDraftBills = async (req, res) => {
 };
 
 /**
- * Cập nhật số điện và phát hành bill (DRAFT → UNPAID)
- * PUT /api/bills/:id/publish
+ * publishDraftBill
+ * ----------------
+ * Phát hành bill DRAFT → UNPAID
+ * Input: billId
+ * Output: bill đã phát hành
+ * Quyền hạn: admin
+ * Lưu ý: chỉ publish bill ở trạng thái DRAFT
  */
 export const publishDraftBill = async (req, res) => {
   try {
@@ -825,7 +846,14 @@ export const getMyPendingPayment = async (req, res) => {
   }
 };
 
-// Tenant request thanh toán tiền mặt (chuyển status sang PENDING_CASH_CONFIRM)
+/**
+ * requestCashPayment
+ * ----------------
+ * Tenant yêu cầu thanh toán tiền mặt
+ * Input: billId
+ * Output: trạng thái request thành công
+ * Quyền hạn: tenant
+ */
 export const requestCashPayment = async (req, res) => {
   try {
     const { id } = req.params;
@@ -960,7 +988,14 @@ export const requestCashPayment = async (req, res) => {
   }
 };
 
-// Admin xác nhận thanh toán tiền mặt
+/**
+ * confirmCashPayment
+ * ----------------
+ * Admin xác nhận thanh toán tiền mặt theo request tenant
+ * Input: billId
+ * Output: bill đã thanh toán
+ * Quyền hạn: admin
+ */
 export const confirmCashPayment = async (req, res) => {
   try {
     const { id } = req.params;
