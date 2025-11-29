@@ -172,8 +172,10 @@ export const createPublicPayment = async (req, res) => {
 
     // Check amount
     const balance = decToNumber(bill.amountDue) - decToNumber(bill.amountPaid);
-    if (Number(amount) <= 0 || Number(amount) > balance + 0.001) {
-      return res.status(400).json({ success: false, message: "Số tiền không hợp lệ" });
+    console.log("💰 Public payment controller validation - Amount:", amount, "Balance:", balance);
+    if (Number(amount) <= 0 || Number(amount) > balance + 1) {
+      console.log("❌ Invalid amount in public controller - Amount must be between 0 and", balance);
+      return res.status(400).json({ success: false, message: "Số tiền không hợp lệ", amount, balance });
     }
 
     const providerUpper = provider.toUpperCase();

@@ -253,8 +253,17 @@ export const createPayment = async (req, res) => {
         if (!bill) return res.status(404).json({ error: "Bill not found" });
 
         const balance = decToNumber(bill.amountDue) - decToNumber(bill.amountPaid);
-        if (Number(amount) <= 0 || Number(amount) > balance + 0.001) {
-            return res.status(400).json({ error: "Invalid amount" });
+        console.log("💰 Payment validation - Amount:", amount, "Balance:", balance);
+        console.log("📊 Bill details:", {
+            amountDue: decToNumber(bill.amountDue),
+            amountPaid: decToNumber(bill.amountPaid),
+            balance,
+            billType: bill.billType,
+            status: bill.status
+        });
+        if (Number(amount) <= 0 || Number(amount) > balance + 1) {
+            console.log("❌ Invalid amount - Amount must be between 0 and", balance);
+            return res.status(400).json({ error: "Invalid amount", amount, balance });
         }
 
         const providerUpper = provider.toUpperCase();

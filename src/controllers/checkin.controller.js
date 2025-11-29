@@ -3,6 +3,7 @@ import Contract from "../models/contract.model.js";
 import Bill from "../models/bill.model.js";
 import Room from "../models/room.model.js";
 import Checkin from "../models/checkin.model.js";
+import User from "../models/user.model.js";
 import { buildSampleContractDocBuffer } from "../services/docx.service.js";
 
 function toDec(n) {
@@ -34,6 +35,8 @@ export const createCashCheckin = async (req, res) => {
       deposit,
       notes,
       identityNo,
+      address,
+      initialElectricReading,
       // Nếu đã có tài khoản thì gửi kèm tenantId
       tenantId,
     } = req.body || {};
@@ -49,6 +52,15 @@ export const createCashCheckin = async (req, res) => {
 
     const room = await Room.findById(roomId);
     if (!room) return res.status(404).json({ success: false, message: "Room not found" });
+
+    // Lấy thông tin tenant nếu có tenantId
+    let tenantInfo = null;
+    if (tenantId) {
+      tenantInfo = await User.findById(tenantId);
+      if (!tenantInfo) {
+        return res.status(404).json({ success: false, message: "Tenant not found" });
+      }
+    }
 
     const startDate = new Date(checkinDate);
     const endDate = addMonths(startDate, duration);
@@ -88,7 +100,11 @@ export const createCashCheckin = async (req, res) => {
       monthlyRent: toDec(monthlyRent),
       tenantSnapshot: {
         identityNo: identityNo || "",
+        fullName: tenantInfo?.fullName || "",
+        phone: tenantInfo?.phone || "",
+        address: address || tenantInfo?.address || "",
       },
+      initialElectricReading: initialElectricReading ? Number(initialElectricReading) : undefined,
       cccdImages,
       notes,
       status: "CREATED",
@@ -177,6 +193,8 @@ export const createOnlineCheckin = async (req, res) => {
       deposit,
       notes,
       identityNo,
+      address,
+      initialElectricReading,
       tenantId,
     } = req.body || {};
 
@@ -191,6 +209,15 @@ export const createOnlineCheckin = async (req, res) => {
 
     const room = await Room.findById(roomId);
     if (!room) return res.status(404).json({ success: false, message: "Room not found" });
+
+    // Lấy thông tin tenant nếu có tenantId
+    let tenantInfo = null;
+    if (tenantId) {
+      tenantInfo = await User.findById(tenantId);
+      if (!tenantInfo) {
+        return res.status(404).json({ success: false, message: "Tenant not found" });
+      }
+    }
 
     const startDate = new Date(checkinDate);
     const endDate = addMonths(startDate, duration);
@@ -229,7 +256,11 @@ export const createOnlineCheckin = async (req, res) => {
       monthlyRent: toDec(monthlyRent),
       tenantSnapshot: {
         identityNo: identityNo || "",
+        fullName: tenantInfo?.fullName || "",
+        phone: tenantInfo?.phone || "",
+        address: address || tenantInfo?.address || "",
       },
+      initialElectricReading: initialElectricReading ? Number(initialElectricReading) : undefined,
       cccdImages,
       notes,
       status: "CREATED",
@@ -382,6 +413,21 @@ export const downloadSampleDocx = async (req, res) => {
     if (!bill) return res.status(404).json({ success: false, message: "Receipt bill not found" });
     if (bill.status !== "PAID") {
       return res.status(403).json({ success: false, message: "Phiếu thu chưa thanh toán — không thể tạo hợp đồng mẫu" });
+    }
+
+    // Lấy thông tin tenant mới nhất từ database nếu có tenantId
+    if (checkin.tenantId) {
+      const tenant = await User.findById(checkin.tenantId);
+      if (tenant) {
+        // Cập nhật tenantSnapshot với thông tin mới nhất
+        checkin.tenantSnapshot = {
+          ...checkin.tenantSnapshot,
+          fullName: tenant.fullName || checkin.tenantSnapshot?.fullName || "",
+          phone: tenant.phone || checkin.tenantSnapshot?.phone || "",
+          address: tenant.address || checkin.tenantSnapshot?.address || "",
+          identityNo: checkin.tenantSnapshot?.identityNo || "",
+        };
+      }
     }
 
     const buffer = await buildSampleContractDocBuffer(checkin, {

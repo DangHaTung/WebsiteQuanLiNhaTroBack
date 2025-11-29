@@ -121,8 +121,10 @@ router.post("/payment/:billId/:token/create", async (req, res) => {
     const balance = amountDue - amountPaid;
 
     const paymentAmount = amount || balance;
-    if (Number(paymentAmount) <= 0 || Number(paymentAmount) > balance + 0.001) {
-      return res.status(400).json({ error: "Invalid amount" });
+    console.log("💰 Public route validation - Amount:", paymentAmount, "Balance:", balance);
+    if (Number(paymentAmount) <= 0 || Number(paymentAmount) > balance + 1) {
+      console.log("❌ Invalid amount in public route - Amount must be between 0 and", balance);
+      return res.status(400).json({ error: "Invalid amount", amount: paymentAmount, balance });
     }
 
     // Build return URL (public payment success page)
