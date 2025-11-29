@@ -214,43 +214,64 @@ export const getRoomById = async (req, res) => {
 
         formattedRoom.checkins = checkins.map(formatCheckin);
 
-        // Lấy hợp đồng (contracts) liên quan đến phòng này
-        const Contract = (await import("../models/contract.model.js")).default;
-        const contracts = await Contract.find({ roomId: id })
-            .populate("tenantId", "fullName email phone")
-            .sort({ createdAt: -1 });
+        // Lấy hợp đồng CHÍNH THỨC (FinalContract) liên quan đến phòng này
+        // CHỈ lấy FinalContract từ checkins đã có phiếu cọc được thanh toán (receiptPaidAt không null)
+        const FinalContract = (await import("../models/finalContract.model.js")).default;
+        const paidCheckins = checkins.filter(c => c.receiptPaidAt != null);
+        const finalContractIdsFromPaidCheckins = paidCheckins
+            .filter(c => c.finalContractId)
+            .map(c => c.finalContractId);
+        
+        let finalContracts = [];
+        if (finalContractIdsFromPaidCheckins.length > 0) {
+            finalContracts = await FinalContract.find({ 
+                _id: { $in: finalContractIdsFromPaidCheckins },
+                roomId: id 
+            })
+                .populate("tenantId", "fullName email phone")
+                .populate("roomId", "roomNumber pricePerMonth")
+                .sort({ createdAt: -1 });
+        }
 
-        // Format contracts
-        const formatContract = (contract) => {
-            const obj = contract.toObject ? contract.toObject() : contract;
+        // Format FinalContract (hợp đồng chính thức)
+        const formatFinalContract = (finalContract) => {
+            const obj = finalContract.toObject ? finalContract.toObject() : finalContract;
             return {
                 _id: obj._id,
                 tenantId: obj.tenantId,
                 roomId: obj.roomId,
+                originContractId: obj.originContractId,
                 startDate: obj.startDate,
                 endDate: obj.endDate,
                 deposit: convertDecimal128(obj.deposit),
                 monthlyRent: convertDecimal128(obj.monthlyRent),
                 status: obj.status,
-                pricingSnapshot: obj.pricingSnapshot,
-                tenantSnapshot: obj.tenantSnapshot,
-                depositRefunded: obj.depositRefunded,
-                depositRefund: obj.depositRefund,
-                coTenants: obj.coTenants,
+                pricingSnapshot: obj.pricingSnapshot ? {
+                    ...obj.pricingSnapshot,
+                    monthlyRent: convertDecimal128(obj.pricingSnapshot.monthlyRent),
+                    deposit: convertDecimal128(obj.pricingSnapshot.deposit),
+                } : undefined,
+                terms: obj.terms,
+                images: obj.images,
+                cccdFiles: obj.cccdFiles,
+                tenantSignedAt: obj.tenantSignedAt,
+                ownerApprovedAt: obj.ownerApprovedAt,
+                finalizedAt: obj.finalizedAt,
                 createdAt: obj.createdAt,
                 updatedAt: obj.updatedAt,
             };
         };
 
-        formattedRoom.contracts = contracts.map(formatContract);
+        formattedRoom.contracts = finalContracts.map(formatFinalContract);
 
-        // Lấy hóa đơn (bills) liên quan đến phòng này (qua contracts)
+        // Lấy hóa đơn (bills) liên quan đến phòng này (qua FinalContracts)
         const Bill = (await import("../models/bill.model.js")).default;
-        const contractIds = contracts.map(c => c._id);
+        const finalContractIds = finalContracts.map(c => c._id);
         const bills = await Bill.find({ 
-            contractId: { $in: contractIds }
+            finalContractId: { $in: finalContractIds }
         })
             .populate("contractId")
+            .populate("finalContractId")
             .sort({ createdAt: -1 });
 
         // Format bills

@@ -63,13 +63,21 @@ export const getMyBills = async (req, res) => {
     // Lấy tất cả contractIds và finalContractIds (bao gồm co-tenant)
     const { contractIds, finalContractIds } = await getUserContractIds(userId);
 
+    // Lọc finalContractIds: chỉ lấy FinalContract chưa bị hủy
+    const FinalContract = (await import("../models/finalContract.model.js")).default;
+    const activeFinalContracts = await FinalContract.find({ 
+      _id: { $in: finalContractIds },
+      status: { $ne: "CANCELED" }
+    }).select('_id');
+    const activeFinalContractIds = activeFinalContracts.map(fc => fc._id);
+
     // Tìm bills từ cả Contract và FinalContract, hoặc bills có tenantId = userId (RECEIPT bills)
     const filterConditions = [];
     if (contractIds.length > 0) {
       filterConditions.push({ contractId: { $in: contractIds } });
     }
-    if (finalContractIds.length > 0) {
-      filterConditions.push({ finalContractId: { $in: finalContractIds } });
+    if (activeFinalContractIds.length > 0) {
+      filterConditions.push({ finalContractId: { $in: activeFinalContractIds } });
     }
     // Thêm điều kiện lấy bills có tenantId = userId (cho RECEIPT bills)
     filterConditions.push({ tenantId: userId });
@@ -93,20 +101,58 @@ export const getMyBills = async (req, res) => {
       ? { $or: filterConditions }
       : filterConditions[0];
     
-    // Chỉ hiển thị bills đã publish (không phải DRAFT)
-    filter = { ...filter, status: { $ne: "DRAFT" } };
+    // Chỉ hiển thị bills đã publish (không phải DRAFT) và không bị hủy (không phải VOID)
+    filter = { ...filter, status: { $nin: ["DRAFT", "VOID"] } };
 
     const bills = await Bill.find(filter)
       .populate("contractId")
-      .populate("finalContractId")
+      .populate({
+        path: "finalContractId",
+        select: "_id status"
+      })
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
+    
+    // Filter thêm: loại bỏ bills của FinalContract đã bị hủy
+    const filteredBills = bills.filter(bill => {
+      if (bill.finalContractId) {
+        const finalContract = bill.finalContractId;
+        const finalContractStatus = typeof finalContract === 'object' && finalContract.status 
+          ? finalContract.status 
+          : null;
+        // Nếu FinalContract đã bị hủy, không hiển thị bill này
+        if (finalContractStatus === "CANCELED") {
+          return false;
+        }
+      }
+      return true;
+    });
 
-    const total = await Bill.countDocuments(filter);
-
-    // Format bills để chuyển đổi Decimal128 sang number
-    const formattedBills = bills.map(formatBill);
+    // Format bills để chuyển đổi Decimal128 sang number (sử dụng filteredBills)
+    const formattedBills = filteredBills.map(formatBill);
+    
+    // Tính lại total: đếm tất cả bills sau khi filter (không giới hạn limit)
+    // Lưu ý: pagination có thể không chính xác 100% vì filter sau khi query
+    // Nhưng đây là cách tốt nhất để đảm bảo không hiển thị bills của FinalContract đã hủy
+    const allBillsForCount = await Bill.find(filter)
+      .populate({
+        path: "finalContractId",
+        select: "_id status"
+      });
+    const filteredBillsForCount = allBillsForCount.filter(bill => {
+      if (bill.finalContractId) {
+        const finalContract = bill.finalContractId;
+        const finalContractStatus = typeof finalContract === 'object' && finalContract.status 
+          ? finalContract.status 
+          : null;
+        if (finalContractStatus === "CANCELED") {
+          return false;
+        }
+      }
+      return true;
+    });
+    const total = filteredBillsForCount.length;
 
     res.status(200).json({
       message: "Lấy danh sách hóa đơn thành công",
@@ -750,8 +796,15 @@ export const requestCashPayment = async (req, res) => {
 
     // Tìm bill
     const bill = await Bill.findById(id)
-      .populate("contractId")
-      .populate("finalContractId");
+      .populate("tenantId")
+      .populate({
+        path: "contractId",
+        populate: { path: "tenantId" }
+      })
+      .populate({
+        path: "finalContractId",
+        populate: { path: "tenantId" }
+      });
 
     if (!bill) {
       return res.status(404).json({
@@ -761,10 +814,52 @@ export const requestCashPayment = async (req, res) => {
     }
 
     // Kiểm tra quyền: bill phải thuộc về user này
-    const contractTenantId = bill.contractId?.tenantId?.toString();
-    const finalContractTenantId = bill.finalContractId?.tenantId?.toString();
+    // Logic tương tự getMyBills: kiểm tra từ nhiều nguồn
+    const userIdStr = userId.toString();
+    let hasPermission = false;
     
-    if (contractTenantId !== userId.toString() && finalContractTenantId !== userId.toString()) {
+    // 1. Kiểm tra bill.tenantId (cho RECEIPT bills)
+    if (bill.tenantId) {
+      const billTenantId = typeof bill.tenantId === 'object' ? bill.tenantId._id?.toString() : bill.tenantId.toString();
+      if (billTenantId === userIdStr) {
+        hasPermission = true;
+      }
+    }
+    
+    // 2. Kiểm tra contractId.tenantId (bao gồm co-tenant)
+    if (!hasPermission && bill.contractId) {
+      const contract = await Contract.findById(bill.contractId._id || bill.contractId).lean();
+      if (contract) {
+        const contractTenantId = contract.tenantId?.toString();
+        const isCoTenant = contract.coTenants?.some((ct) => ct.userId?.toString() === userIdStr);
+        if (contractTenantId === userIdStr || isCoTenant) {
+          hasPermission = true;
+        }
+      }
+    }
+    
+    // 3. Kiểm tra finalContractId.tenantId
+    if (!hasPermission && bill.finalContractId) {
+      const FinalContract = (await import("../models/finalContract.model.js")).default;
+      const finalContract = await FinalContract.findById(bill.finalContractId._id || bill.finalContractId).lean();
+      if (finalContract && finalContract.tenantId?.toString() === userIdStr) {
+        hasPermission = true;
+      }
+    }
+    
+    // Debug logging
+    console.log("🔍 requestCashPayment - Permission check:", {
+      billId: id,
+      userId: userIdStr,
+      billType: bill.billType,
+      hasPermission,
+      hasContractId: !!bill.contractId,
+      hasFinalContractId: !!bill.finalContractId,
+      hasTenantId: !!bill.tenantId,
+    });
+    
+    if (!hasPermission) {
+      console.log("❌ Permission denied for bill:", id, "userId:", userIdStr);
       return res.status(403).json({
         success: false,
         message: "Bạn không có quyền thao tác với hóa đơn này",
