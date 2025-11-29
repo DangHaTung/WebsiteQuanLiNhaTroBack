@@ -6,23 +6,31 @@ import Checkin from "../models/checkin.model.js";
 import User from "../models/user.model.js";
 import { buildSampleContractDocBuffer } from "../services/docx.service.js";
 
+// ==============================
+// Helper functions
+// ==============================
+
+// Chuyển số sang Decimal128 của Mongoose
 function toDec(n) {
   return mongoose.Types.Decimal128.fromString(Number(n).toFixed(2));
 }
 
+// Thêm số tháng vào ngày
 function addMonths(date, months) {
   const d = new Date(date);
   d.setMonth(d.getMonth() + Number(months));
   return d;
 }
-// Tạo check-in với phiếu thu tiền mặt (OFFLINE)
 
+// ==============================
+// Tạo check-in với phiếu thu tiền mặt (OFFLINE)
+// ==============================
 export const createCashCheckin = async (req, res) => {
   try {
     const user = req.user;
     if (!user?._id) return res.status(401).json({ success: false, message: "Unauthorized" });
 
-    // Chỉ ADMIN/STAFF mới được phép check-in (tạo biên lai và hóa đơn cash)
+    // Kiểm tra role: chỉ ADMIN mới được phép tạo check-in offline
     const role = user.role;
     if (!(["ADMIN"].includes(role))) {
       return res.status(403).json({ success: false, message: "Forbidden" });
@@ -41,15 +49,17 @@ export const createCashCheckin = async (req, res) => {
       tenantId,
     } = req.body || {};
 
+    // Validate các trường bắt buộc
     if (!roomId || !checkinDate || !duration || deposit === undefined) {
       return res.status(400).json({ success: false, message: "roomId, checkinDate, duration, deposit are required" });
     }
 
-    // Kiểm tra upload ảnh CCCD
+    // Validate upload ảnh CCCD
     if (!req.files || !req.files.cccdFront || !req.files.cccdBack) {
       return res.status(400).json({ success: false, message: "Vui lòng upload đầy đủ ảnh CCCD mặt trước và mặt sau" });
     }
 
+    // Lấy thông tin phòng
     const room = await Room.findById(roomId);
     if (!room) return res.status(404).json({ success: false, message: "Room not found" });
 
@@ -62,6 +72,7 @@ export const createCashCheckin = async (req, res) => {
       }
     }
 
+    // Tính ngày bắt đầu và kết thúc check-in
     const startDate = new Date(checkinDate);
     const endDate = addMonths(startDate, duration);
     const monthlyRent = Number(room.pricePerMonth || 0);
@@ -110,7 +121,7 @@ export const createCashCheckin = async (req, res) => {
       status: "CREATED",
     });
 
-    
+    // 2) Tạo hợp đồng tạm thời (Contract)
     const contractPayload = {
       roomId,
       startDate,
@@ -130,7 +141,6 @@ export const createCashCheckin = async (req, res) => {
     }
     const contract = await Contract.create(contractPayload);
 
-  
     const receiptLineItems = [
       {
         item: "Đặt cọc",
@@ -177,6 +187,9 @@ export const createCashCheckin = async (req, res) => {
   }
 };
 
+// ==============================
+// Tạo check-in ONLINE với payment link
+// ==============================
 export const createOnlineCheckin = async (req, res) => {
   try {
     const user = req.user;
@@ -186,6 +199,7 @@ export const createOnlineCheckin = async (req, res) => {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
+    // Lấy dữ liệu từ request
     const {
       roomId,
       checkinDate,
@@ -246,6 +260,7 @@ export const createOnlineCheckin = async (req, res) => {
       },
     };
 
+    // Tạo bản ghi Checkin
     const checkinRecord = await Checkin.create({
       tenantId: tenantId || undefined,
       staffId: user._id,
