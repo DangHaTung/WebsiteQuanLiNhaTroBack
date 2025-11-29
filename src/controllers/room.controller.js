@@ -215,23 +215,13 @@ export const getRoomById = async (req, res) => {
         formattedRoom.checkins = checkins.map(formatCheckin);
 
         // Lấy hợp đồng CHÍNH THỨC (FinalContract) liên quan đến phòng này
-        // CHỈ lấy FinalContract từ checkins đã có phiếu cọc được thanh toán (receiptPaidAt không null)
         const FinalContract = (await import("../models/finalContract.model.js")).default;
-        const paidCheckins = checkins.filter(c => c.receiptPaidAt != null);
-        const finalContractIdsFromPaidCheckins = paidCheckins
-            .filter(c => c.finalContractId)
-            .map(c => c.finalContractId);
-        
-        let finalContracts = [];
-        if (finalContractIdsFromPaidCheckins.length > 0) {
-            finalContracts = await FinalContract.find({ 
-                _id: { $in: finalContractIdsFromPaidCheckins },
-                roomId: id 
-            })
-                .populate("tenantId", "fullName email phone")
-                .populate("roomId", "roomNumber pricePerMonth")
-                .sort({ createdAt: -1 });
-        }
+        const finalContracts = await FinalContract.find({ 
+            roomId: id 
+        })
+            .populate("tenantId", "fullName email phone")
+            .populate("roomId", "roomNumber pricePerMonth")
+            .sort({ createdAt: -1 });
 
         // Format FinalContract (hợp đồng chính thức)
         const formatFinalContract = (finalContract) => {
