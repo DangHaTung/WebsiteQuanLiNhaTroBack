@@ -103,6 +103,53 @@ export const createFromContract = async (req, res) => {
       return res.status(400).json({ success: false, message: "Check-in record not found for contract" });
     }
 
+    // Kiểm tra xem phiếu thu (receipt) này đã có FinalContract nào với bill CONTRACT đã thanh toán chưa
+    // Logic: Nếu cọc chưa được thanh toán hợp đồng nào, vẫn được tạo lại
+    if (checkin.receiptBillId) {
+      // Tìm tất cả FinalContract liên quan đến checkin này (qua contractId)
+      const allFinalContractsForCheckin = await FinalContract.find({ originContractId: contract._id });
+      
+      // Kiểm tra xem có FinalContract nào có bill CONTRACT đã thanh toán không
+      for (const fc of allFinalContractsForCheckin) {
+        const existingBills = await Bill.find({ 
+          finalContractId: fc._id,
+          billType: "CONTRACT"
+        });
+        const contractBill = existingBills.find(b => b.billType === "CONTRACT");
+        
+        // Nếu có bill CONTRACT đã thanh toán, không cho tạo lại
+        if (contractBill && contractBill.status === "PAID") {
+          return res.status(400).json({ 
+            success: false, 
+            message: "Không thể tạo lại hóa đơn hợp đồng vì cọc này đã được thanh toán hợp đồng. Vui lòng tạo hợp đồng mới." 
+          });
+        }
+      }
+      
+      // Nếu có FinalContract chưa bị hủy và bill chưa thanh toán, vẫn không cho tạo lại (tránh duplicate)
+      const activeFinalContract = allFinalContractsForCheckin.find(fc => fc.status !== "CANCELED");
+      if (activeFinalContract) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "Đã tồn tại hợp đồng chính thức cho contract này. Vui lòng hủy hợp đồng cũ trước khi tạo lại." 
+        });
+      }
+      
+      // Nếu tất cả FinalContract đã bị hủy và không có bill CONTRACT nào đã thanh toán, cho phép tạo lại
+      if (allFinalContractsForCheckin.length > 0) {
+        console.log(`⚠️ Found CANCELED FinalContract(s) for contract ${contract._id}. Allowing recreation because no bill CONTRACT is PAID.`);
+      }
+    }
+
+    // Lấy số tiền đã thanh toán ở phiếu thu cọc giữ phòng
+    let receiptBillPaidAmount = 0;
+    if (checkin.receiptBillId) {
+      const receiptBill = await Bill.findById(checkin.receiptBillId);
+      if (receiptBill) {
+        receiptBillPaidAmount = toNum(receiptBill.amountPaid) || 0;
+      }
+    }
+
     // Determine tenantId: prefer contract.tenantId, else allow missing (gán sau)
     const tenantForFinal = contract.tenantId?._id || contract.tenantId || tenantIdFromBody;
 
@@ -123,21 +170,60 @@ export const createFromContract = async (req, res) => {
       status: "DRAFT",
     });
 
-    // Create bill_contract for the first month rent
-    // Mỗi FinalContract có 1 bill CONTRACT riêng
+    // Create 1 bill CONTRACT gộp: Tiền thuê tháng đầu + Tiền cọc (1 tháng tiền phòng)
+    // Logic mới:
+    // - Tiền thuê tháng đầu: 5tr (chờ thanh toán)
+    // - Tiền cọc 1 tháng tiền phòng: 5tr - 500k (đã cọc giữ phòng) = 4tr5 (chờ thanh toán)
+    // - Tổng phải đóng: 5tr + 4tr5 = 9tr5
+    // 
+    // amountDue = số tiền còn lại phải đóng (9tr5)
+    // amountPaid = số tiền đã đóng (500k từ phiếu thu cọc giữ phòng)
+    const monthlyRentNum = toNum(contract.monthlyRent);
+    const depositRemaining = Math.max(0, monthlyRentNum - receiptBillPaidAmount); // Cọc còn lại phải đóng: 5tr - 500k = 4tr5
+    const totalRemainingAmount = monthlyRentNum + depositRemaining; // Tổng còn lại: 5tr + 4tr5 = 9tr5
+    
+    // Xác định status ban đầu
+    // Khi mới tạo: status = UNPAID (chờ thanh toán)
+    // Vì các khoản 2 và 3 chưa thanh toán, chỉ có khoản 1 (cọc giữ phòng) đã thanh toán
+    let initialStatus = "UNPAID";
+    let initialAmountPaid = receiptBillPaidAmount; // 500k
+    if (receiptBillPaidAmount >= totalRemainingAmount) {
+      // Nếu đã đóng đủ tổng (9tr5), thì status = PAID
+      initialStatus = "PAID";
+      initialAmountPaid = totalRemainingAmount;
+    } else if (receiptBillPaidAmount > 0) {
+      // Nếu đã đóng một phần (500k), nhưng vẫn để UNPAID vì các khoản 2 và 3 chưa thanh toán
+      // Chỉ khi thanh toán thêm thì mới chuyển sang PARTIALLY_PAID hoặc PAID
+      initialStatus = "UNPAID";
+    }
+
+    // Copy payments từ receipt bill nếu có
+    let initialPayments = [];
+    if (checkin.receiptBillId) {
+      const receiptBill = await Bill.findById(checkin.receiptBillId);
+      if (receiptBill && receiptBill.payments && receiptBill.payments.length > 0) {
+        initialPayments = receiptBill.payments.map(p => ({
+          ...p,
+          note: p.note ? `${p.note} (từ phiếu thu cọc giữ phòng)` : "Từ phiếu thu cọc giữ phòng"
+        }));
+      }
+    }
+
     await Bill.create({
       contractId: contract._id,
       finalContractId: finalContract._id, // Link to this specific FinalContract
       billingDate: new Date(),
       billType: "CONTRACT",
-      status: "UNPAID",
+      status: initialStatus,
       lineItems: [
         { item: "Tiền thuê tháng đầu", quantity: 1, unitPrice: contract.monthlyRent, lineTotal: contract.monthlyRent },
+        { item: "Tiền cọc (1 tháng tiền phòng)", quantity: 1, unitPrice: toDec(depositRemaining), lineTotal: toDec(depositRemaining) },
       ],
-      amountDue: contract.monthlyRent,
-      amountPaid: toDec(0),
-      payments: [],
-      note: `Bill hợp đồng (tháng đầu) cho FinalContract ${finalContract._id}`,
+      // amountDue = số tiền còn lại phải đóng (9tr5)
+      amountDue: toDec(totalRemainingAmount), // 9tr5
+      amountPaid: toDec(initialAmountPaid), // 500k
+      payments: initialPayments,
+      note: `Bill hợp đồng. Tiền thuê tháng đầu: ${monthlyRentNum.toLocaleString("vi-VN")} đ. Tiền cọc còn lại: ${depositRemaining.toLocaleString("vi-VN")} đ. Đã đóng ở phiếu thu cọc giữ phòng: ${receiptBillPaidAmount.toLocaleString("vi-VN")} đ. Tổng phải đóng: ${totalRemainingAmount.toLocaleString("vi-VN")} đ.`,
     });
 
     const populated = await FinalContract.findById(finalContract._id)
@@ -185,25 +271,24 @@ export const uploadFiles = async (req, res) => {
     if (!isAdmin) return res.status(403).json({ success: false, message: "Forbidden" });
 
     // ✅ VALIDATION: Kiểm tra bill CONTRACT đã thanh toán chưa
-    if (fc.originContractId) {
-      const contractBill = await Bill.findOne({
-        contractId: fc.originContractId,
-        billType: "CONTRACT",
+    // CONTRACT bill được tạo với finalContractId, không phải contractId
+    const contractBill = await Bill.findOne({
+      finalContractId: fc._id,
+      billType: "CONTRACT",
+    });
+    
+    if (!contractBill) {
+      return res.status(400).json({
+        success: false,
+        message: "Không tìm thấy hóa đơn tháng đầu (CONTRACT bill)"
       });
-      
-      if (!contractBill) {
-        return res.status(400).json({
-          success: false,
-          message: "Không tìm thấy hóa đơn tháng đầu (CONTRACT bill)"
-        });
-      }
-      
-      if (contractBill.status !== "PAID") {
-        return res.status(400).json({
-          success: false,
-          message: "Vui lòng thanh toán hóa đơn tháng đầu trước khi upload hợp đồng"
-        });
-      }
+    }
+    
+    if (contractBill.status !== "PAID") {
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng thanh toán hóa đơn tháng đầu trước khi upload hợp đồng"
+      });
     }
 
     const files = (req.files || []).map((f) => ({
@@ -668,6 +753,26 @@ export const cancelFinalContract = async (req, res) => {
     if (fc.status === "CANCELED") {
       return res.status(400).json({ success: false, message: "Final contract already canceled" });
     }
+    
+    // Hủy tất cả bills CONTRACT liên quan đến FinalContract này (chỉ hủy nếu chưa thanh toán)
+    const Bill = (await import("../models/bill.model.js")).default;
+    const bills = await Bill.find({ 
+      finalContractId: fc._id,
+      billType: "CONTRACT"
+    });
+    
+    for (const bill of bills) {
+      // Chỉ hủy nếu bill chưa thanh toán hoặc chỉ thanh toán một phần
+      if (bill.status !== "PAID") {
+        bill.status = "VOID";
+        bill.note = bill.note ? `${bill.note} [Đã hủy do hủy hợp đồng chính thức]` : "Đã hủy do hủy hợp đồng chính thức";
+        await bill.save();
+        console.log(`✅ Hủy bill CONTRACT ${bill._id} do hủy FinalContract ${fc._id}`);
+      } else {
+        console.log(`⚠️ Không thể hủy bill CONTRACT ${bill._id} vì đã thanh toán`);
+      }
+    }
+    
     fc.status = "CANCELED";
     await fc.save();
     return res.status(200).json({ success: true, message: "Final contract canceled successfully", data: formatFinalContract(fc) });

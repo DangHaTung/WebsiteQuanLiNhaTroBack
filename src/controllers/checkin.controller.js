@@ -49,7 +49,7 @@ export const createCashCheckin = async (req, res) => {
 
     const room = await Room.findById(roomId);
     if (!room) return res.status(404).json({ success: false, message: "Room not found" });
- 
+
     const startDate = new Date(checkinDate);
     const endDate = addMonths(startDate, duration);
     const monthlyRent = Number(room.pricePerMonth || 0);
