@@ -252,14 +252,11 @@ export const createPayment = async (req, res) => {
         const bill = await Bill.findById(billId);
         if (!bill) return res.status(404).json({ error: "Bill not found" });
 
-        const amountDue = decToNumber(bill.amountDue);
-        const amountPaid = decToNumber(bill.amountPaid);
-        const balance = amountDue - amountPaid;
-        
-        console.log("💰 Payment validation - Amount:", amount, "AmountDue:", amountDue, "Balance:", balance);
+        const balance = decToNumber(bill.amountDue) - decToNumber(bill.amountPaid);
+        console.log("💰 Payment validation - Amount:", amount, "Balance:", balance);
         console.log("📊 Bill details:", {
-            amountDue,
-            amountPaid,
+            amountDue: decToNumber(bill.amountDue),
+            amountPaid: decToNumber(bill.amountPaid),
             balance,
             billType: bill.billType,
             status: bill.status

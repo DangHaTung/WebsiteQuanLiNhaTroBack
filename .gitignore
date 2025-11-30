@@ -1,5 +1,4 @@
 node_modules/
-POSTMAN_TEST_GUIDE.md
 .env
 dist/
 build/
