@@ -3,6 +3,8 @@ import { v4 as uuidv4 } from "uuid";
 import Bill from "../models/bill.model.js";
 import Payment from "../models/payment.model.js";
 import vnpayService from "../services/providers/vnpay.service.js";
+import logService from "../services/log.service.js";
+import notificationService from "../services/notification/notification.service.js";
 
 // helper: convert Decimal128 -> number
 function decToNumber(dec) {
@@ -65,6 +67,29 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
             payment.status = "SUCCESS";
             payment.metadata = { ...rawParams, returnUrl: oldReturnUrl };
             await payment.save({ session });
+
+            // 📝 Log payment success
+            await logService.logPayment({
+                entity: 'BILL',
+                entityId: bill._id,
+                actorId: null, // Payment có thể không có user (guest checkout)
+                amount: amountNum,
+                provider: payment.provider,
+                status: 'SUCCESS',
+                billDetails: {
+                    billType: bill.billType,
+                    roomNumber: bill.roomId?.roomNumber,
+                    tenantName: bill.tenantId?.fullName,
+                    month: bill.month,
+                },
+            });
+
+            // 🔔 Send payment success notification
+            try {
+                await notificationService.notifyPaymentSuccess(bill, payment.provider);
+            } catch (notifError) {
+                console.error('❌ Error sending payment notification:', notifError.message);
+            }
 
             // Tự động complete checkin và cập nhật room status nếu là bill RECEIPT đã PAID
             if (bill.billType === "RECEIPT" && bill.status === "PAID") {
@@ -177,6 +202,29 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
         payment.status = "SUCCESS";
         payment.metadata = { ...rawParams, returnUrl: oldReturnUrl };
         await payment.save();
+
+        // 📝 Log payment success (fallback mode)
+        await logService.logPayment({
+            entity: 'BILL',
+            entityId: bill._id,
+            actorId: null,
+            amount: amountNum,
+            provider: payment.provider,
+            status: 'SUCCESS',
+            billDetails: {
+                billType: bill.billType,
+                roomNumber: bill.roomId?.roomNumber,
+                tenantName: bill.tenantId?.fullName,
+                month: bill.month,
+            },
+        });
+
+        // 🔔 Send payment success notification (fallback mode)
+        try {
+            await notificationService.notifyPaymentSuccess(bill, payment.provider);
+        } catch (notifError) {
+            console.error('❌ Error sending payment notification:', notifError.message);
+        }
 
         // Tự động complete checkin và cập nhật room status nếu là bill RECEIPT đã PAID (fallback mode)
         if (bill.billType === "RECEIPT" && bill.status === "PAID") {

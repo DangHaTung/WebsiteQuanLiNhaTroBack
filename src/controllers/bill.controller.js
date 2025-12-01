@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import Bill from "../models/bill.model.js";
 import Contract from "../models/contract.model.js";
+import logService from "../services/log.service.js";
+import notificationService from "../services/notification/notification.service.js";
 
 // Helper convert Decimal128 sang number
 // Nếu value null/undefined trả về null, ngược lại parseFloat
@@ -291,8 +293,31 @@ export const createBill = async (req, res) => {
     await bill.save();
     
     // Populate và format bill
-    const populatedBill = await Bill.findById(bill._id).populate("contractId");
+    const populatedBill = await Bill.findById(bill._id)
+      .populate("contractId")
+      .populate("tenantId", "fullName email")
+      .populate("roomId", "roomNumber");
     const formattedBill = formatBill(populatedBill);
+    
+    // 📝 Log bill creation
+    await logService.logCreate({
+      entity: 'BILL',
+      entityId: bill._id,
+      actorId: req.user?._id,
+      data: {
+        billType: bill.billType,
+        amountDue: convertDecimal128(bill.amountDue),
+        status: bill.status,
+      },
+    });
+
+    // 🔔 Send notification to tenant
+    try {
+      await notificationService.notifyBillCreated(populatedBill);
+    } catch (notifError) {
+      console.error('❌ Error sending bill notification:', notifError.message);
+      // Don't block bill creation if notification fails
+    }
     
     res.status(201).json({
       message: "Tạo hóa đơn thành công",
@@ -455,6 +480,29 @@ export const confirmCashReceipt = async (req, res) => {
     ];
 
     await bill.save();
+
+    // 📝 Log cash payment confirmation
+    await logService.logPayment({
+      entity: 'BILL',
+      entityId: bill._id,
+      actorId: req.user._id,
+      amount: transfer,
+      provider: 'CASH',
+      status: 'SUCCESS',
+      billDetails: {
+        billType: bill.billType,
+        roomNumber: bill.roomId?.roomNumber,
+        tenantName: bill.tenantId?.fullName,
+        month: bill.month,
+      },
+    });
+
+    // 🔔 Send payment success notification
+    try {
+      await notificationService.notifyPaymentSuccess(bill, 'CASH');
+    } catch (notifError) {
+      console.error('❌ Error sending payment notification:', notifError.message);
+    }
 
     // Tự động complete checkin và cập nhật room status nếu là bill RECEIPT đã PAID
     if (bill.billType === "RECEIPT" && bill.status === "PAID") {

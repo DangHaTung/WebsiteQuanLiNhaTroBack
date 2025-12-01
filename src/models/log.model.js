@@ -6,7 +6,7 @@ const { Schema } = mongoose;
 const LOG_LEVELS = ['INFO', 'WARN', 'ERROR'];
 
 // Enum cho loại đối tượng được log
-const CONTEXT_ENTITIES = ['ROOM', 'CONTRACT', 'BILL', 'USER'];
+const CONTEXT_ENTITIES = ['ROOM', 'CONTRACT', 'BILL', 'USER', 'CHECKIN', 'FINALCONTRACT', 'PAYMENT'];
 
 const LogSchema = new Schema(
   {
@@ -32,6 +32,7 @@ const LogSchema = new Schema(
         required: true,
         refPath: 'context.entityRef', // Có thể dùng ref động nếu cần populate
       },
+      
       actorId: {
         type: Schema.Types.ObjectId,
         ref: 'User',
@@ -39,6 +40,10 @@ const LogSchema = new Schema(
       diff: {
         type: Schema.Types.Mixed, // Lưu thay đổi hoặc payload bất kỳ
       },
+      entityRef: {
+        type: String,
+        required: true
+      }
     },
     createdAt: {
       type: Date,

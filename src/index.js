@@ -28,6 +28,7 @@ import checkinPublicRoute from "./routers/checkin.public.route.js"; // PUBLIC ch
 import finalContractRoute from "./routers/finalContract.route.js"; // PROTECTED final contract routes
 import monthlyBillRoute from "./routers/monthlyBill.route.js"; // Monthly bill generation routes
 import notificationRoute from "./routers/notification.route.js"; // Notification routes
+import notificationCRUDRoute from "./routers/notificationCRUD.route.js"; // Notification CRUD routes
 import moveOutRequestRoute from "./routers/moveOutRequest.route.js"; // Move-out request routes
 import { scheduleMonthlyBillingJob } from "./jobs/monthlyBilling.job.js"; // Cron job tự động tạo hóa đơn
 import { scheduleRentReminderJob } from "./jobs/rentReminder.job.js"; // Cron job nhắc nhở thanh toán
@@ -78,6 +79,7 @@ app.use("/api", utilityFeeRoute); // ADMIN utility fee routes (independent from 
 app.use("/api", roomFeeRoute); // ADMIN room fee routes
 app.use("/api", monthlyBillRoute); // ADMIN monthly bill generation routes
 app.use("/api/notifications", notificationRoute); // Notification routes (Socket.io testing & rent reminders)
+app.use("/api/notifications-crud", notificationCRUDRoute); // Notification CRUD routes
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);

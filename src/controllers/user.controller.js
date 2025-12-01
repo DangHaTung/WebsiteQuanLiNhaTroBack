@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import User from "../models/user.model.js";
 import Contract from "../models/contract.model.js";
 import Bill from "../models/bill.model.js";
+import logService from "../services/log.service.js";
 
 // Lấy danh sách người dùng (hỗ trợ phân trang, lọc role, tìm kiếm keyword)
 export const getAllUsers = async (req, res) => {
@@ -121,6 +122,19 @@ export const createUser = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const newUser = new User({ fullName, email, phone, passwordHash, role: role || "TENANT" });
     await newUser.save();
+
+    // 📝 Log user creation
+    await logService.logCreate({
+      entity: 'USER',
+      entityId: newUser._id,
+      actorId: req.user?._id,
+      data: {
+        fullName: newUser.fullName,
+        email: newUser.email,
+        phone: newUser.phone,
+        role: newUser.role,
+      },
+    });
 
     res.status(201).json({
       success: true,
