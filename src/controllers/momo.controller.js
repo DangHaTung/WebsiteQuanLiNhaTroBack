@@ -90,7 +90,27 @@ const createPayment = async (req, res) => {
             console.log("📋 CONTRACT bill (MoMo) - Recalculated amountDue from lineItems:", amountDue, "(DB amountDue:", decToNumber(bill.amountDue), ")");
         }
 
-        const balance = amountDue - decToNumber(bill.amountPaid);
+        // Với CONTRACT bill status = UNPAID hoặc PENDING_CASH_CONFIRM: amountPaid có thể là số tiền từ RECEIPT bill, không phải số tiền đã thanh toán cho CONTRACT bill
+        // Chỉ trừ amountPaid khi status = PARTIALLY_PAID (đã thanh toán một phần CONTRACT bill)
+        let balance = 0;
+        const isContractUnpaid = bill.billType === "CONTRACT" && (bill.status === "UNPAID" || bill.status === "PENDING_CASH_CONFIRM");
+        console.log("🔍 MoMo Balance calculation:", {
+            billType: bill.billType,
+            status: bill.status,
+            isContractUnpaid,
+            amountDue,
+            amountPaid: decToNumber(bill.amountPaid)
+        });
+        
+        if (isContractUnpaid) {
+            // Với UNPAID hoặc PENDING_CASH_CONFIRM: balance = amountDue (từ lineItems), KHÔNG trừ amountPaid
+            balance = amountDue;
+            console.log("✅ CONTRACT UNPAID/PENDING_CASH_CONFIRM: balance = amountDue (KHÔNG trừ amountPaid)");
+        } else {
+            // Với các trường hợp khác: balance = amountDue - amountPaid
+            balance = amountDue - decToNumber(bill.amountPaid);
+            console.log("⚠️ Other status: balance = amountDue - amountPaid");
+        }
         console.log("💰 MoMo Payment validation - Amount:", amountNum, "Balance:", balance);
         console.log("📊 MoMo Bill details:", {
             amountDue: amountDue,
@@ -273,8 +293,8 @@ const momoReturn = async (req, res) => {
                     await applyPaymentToBill(payment, params);
                 }
                 
-                // Lấy returnUrl từ payment metadata hoặc dùng default
-                const returnUrlFromPayment = payment?.metadata?.returnUrl || `${process.env.FRONTEND_URL || "http://localhost:5173"}/admin/checkins`;
+                // Lấy returnUrl từ payment metadata hoặc dùng default (/invoices)
+                const returnUrlFromPayment = payment?.metadata?.returnUrl || `${process.env.FRONTEND_URL || "http://localhost:5173"}/invoices`;
                 const redirectUrl = `${returnUrlFromPayment}?payment=success&provider=momo&transactionId=${orderId}`;
                 
                 return res.redirect(redirectUrl);

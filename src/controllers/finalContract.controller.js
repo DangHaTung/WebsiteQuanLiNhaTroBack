@@ -782,6 +782,46 @@ export const cancelFinalContract = async (req, res) => {
     
     fc.status = "CANCELED";
     await fc.save();
+    
+    // Cập nhật trạng thái phòng: kiểm tra xem còn FinalContract SIGNED nào khác trong phòng này không
+    try {
+      const Room = (await import("../models/room.model.js")).default;
+      // Lấy roomId - có thể là object (đã populate) hoặc ObjectId
+      const roomId = (fc.roomId && typeof fc.roomId === 'object' && fc.roomId._id) 
+        ? fc.roomId._id 
+        : (fc.roomId || null);
+      
+      if (roomId) {
+        // Đếm số FinalContract SIGNED còn lại trong phòng này (không bao gồm hợp đồng vừa hủy)
+        const remainingSignedContracts = await FinalContract.countDocuments({
+          roomId: roomId,
+          status: "SIGNED",
+          _id: { $ne: fc._id }, // Loại bỏ hợp đồng vừa hủy
+          tenantId: { $exists: true, $ne: null }
+        });
+        
+        // Cập nhật phòng dựa trên số hợp đồng SIGNED còn lại
+        if (remainingSignedContracts === 0) {
+          // Không còn hợp đồng SIGNED nào → phòng trở về trạng thái trống
+          await Room.findByIdAndUpdate(roomId, {
+            status: "AVAILABLE",
+            occupantCount: 0
+          });
+          console.log(`✅ Updated room ${roomId} status to AVAILABLE and occupantCount to 0 (no signed contracts remaining)`);
+        } else {
+          // Vẫn còn hợp đồng SIGNED → cập nhật số người ở
+          await Room.findByIdAndUpdate(roomId, {
+            occupantCount: remainingSignedContracts
+          });
+          console.log(`✅ Updated room ${roomId} occupantCount to ${remainingSignedContracts} (${remainingSignedContracts} signed contracts remaining)`);
+        }
+      } else {
+        console.warn(`⚠️ Cannot update room: FinalContract ${fc._id} has no roomId`);
+      }
+    } catch (err) {
+      console.warn("Cannot update room status/occupantCount after canceling contract:", err);
+    }
+    
     return res.status(200).json({ success: true, message: "Final contract canceled successfully", data: formatFinalContract(fc) });
   } catch (err) {
     console.error("cancelFinalContract error:", err);

@@ -355,6 +355,29 @@ export const refundDeposit = async (req, res) => {
       ? occupantCount 
       : 1 + (contract.coTenants?.filter(ct => !ct.leftAt).length || 0);
 
+    // Tính tổng tiền cọc theo nghiệp vụ:
+    // Tiền cọc = 1 tháng tiền phòng (monthlyRent)
+    // Vì: Khoản 1 (Cọc giữ phòng) + Khoản 2 (Cọc 1 tháng tiền phòng) = 1 tháng tiền phòng
+    
+    let totalDepositPaid = 0;
+    
+    // Cách đơn giản: Tiền cọc = 1 tháng tiền phòng
+    if (contract.roomId && typeof contract.roomId === 'object') {
+      const monthlyRent = convertDecimal128(contract.roomId.pricePerMonth) || convertDecimal128(contract.monthlyRent) || 0;
+      if (monthlyRent > 0) {
+        totalDepositPaid = monthlyRent;
+        console.log(`[refundDeposit] Using monthlyRent as total deposit: ${totalDepositPaid}`);
+      }
+    }
+    
+    // Fallback: nếu không có monthlyRent, dùng contract.deposit
+    if (totalDepositPaid === 0) {
+      totalDepositPaid = convertDecimal128(contract.monthlyRent) || convertDecimal128(contract.deposit) || 0;
+      console.log(`[refundDeposit] Using contract.monthlyRent/deposit as fallback: ${totalDepositPaid}`);
+    }
+    
+    console.log(`[refundDeposit] Total deposit paid: ${totalDepositPaid}`);
+
     // Tính dịch vụ tháng cuối (BỎ tiền thuê phòng)
     console.log('[refundDeposit] Calculating service fees...');
     const { calculateRoomMonthlyFees } = await import("../services/billing/monthlyBill.service.js");
@@ -368,11 +391,10 @@ export const refundDeposit = async (req, res) => {
     });
     console.log('[refundDeposit] Service fees calculated:', serviceFees.totalAmount);
 
-    const depositAmount = convertDecimal128(contract.deposit) || 0;
     const damageAmountNum = Number(damageAmount) || 0;
-    const refundAmount = depositAmount - serviceFees.totalAmount - damageAmountNum;
+    const refundAmount = totalDepositPaid - serviceFees.totalAmount - damageAmountNum;
     
-    console.log('[refundDeposit] Calculation: deposit=', depositAmount, 'serviceFees=', serviceFees.totalAmount, 'damage=', damageAmountNum, 'refund=', refundAmount);
+    console.log('[refundDeposit] Calculation: totalDepositPaid=', totalDepositPaid, 'serviceFees=', serviceFees.totalAmount, 'damage=', damageAmountNum, 'refund=', refundAmount);
 
     // Cập nhật contract (giữ lại co-tenants, không xóa)
     contract.status = "ENDED"; // Set sang ENDED khi hoàn cọc
@@ -390,7 +412,7 @@ export const refundDeposit = async (req, res) => {
     await contract.save();
 
     // 1. Cancel FinalContract của người thuê chính (KHÔNG cancel FinalContract của co-tenant)
-    const FinalContract = (await import("../models/finalContract.model.js")).default;
+    // FinalContract đã được import ở trên (dòng 375)
     
     // Tìm FinalContract của người thuê chính:
     // - originContractId = contract._id (FinalContract chính)
@@ -407,13 +429,13 @@ export const refundDeposit = async (req, res) => {
       finalContractQuery.tenantId = contract.tenantId;
     }
     
-    const finalContract = await FinalContract.findOne(finalContractQuery);
-
-    if (finalContract) {
-      console.log(`[refundDeposit] Found FinalContract ${finalContract._id} (status: ${finalContract.status}) for main tenant ${contract.tenantId}, canceling...`);
-      finalContract.status = "CANCELED";
-      await finalContract.save();
-      console.log(`[refundDeposit] FinalContract ${finalContract._id} canceled successfully`);
+    const mainTenantFinalContract = await FinalContract.findOne(finalContractQuery);
+    
+    if (mainTenantFinalContract) {
+      console.log(`[refundDeposit] Found FinalContract ${mainTenantFinalContract._id} (status: ${mainTenantFinalContract.status}) for main tenant ${contract.tenantId}, canceling...`);
+      mainTenantFinalContract.status = "CANCELED";
+      await mainTenantFinalContract.save();
+      console.log(`[refundDeposit] FinalContract ${mainTenantFinalContract._id} canceled successfully`);
     } else {
       console.log(`[refundDeposit] No FinalContract found for main tenant contract ${contract._id}`);
       console.log(`[refundDeposit] Search query:`, JSON.stringify(finalContractQuery, null, 2));

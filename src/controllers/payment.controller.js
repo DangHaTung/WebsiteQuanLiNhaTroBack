@@ -252,20 +252,44 @@ export const createPayment = async (req, res) => {
         const bill = await Bill.findById(billId);
         if (!bill) return res.status(404).json({ error: "Bill not found" });
 
-        const balance = decToNumber(bill.amountDue) - decToNumber(bill.amountPaid);
+        // Với CONTRACT bill: tính lại amountDue từ lineItems để đảm bảo chính xác
+        let amountDue = decToNumber(bill.amountDue);
+        if (bill.billType === "CONTRACT" && bill.lineItems && bill.lineItems.length > 0) {
+            // Tính tổng tất cả lineItems của CONTRACT bill
+            let totalFromLineItems = 0;
+            bill.lineItems.forEach((item) => {
+                const itemTotal = decToNumber(item.lineTotal);
+                totalFromLineItems += itemTotal;
+                console.log(`📋 CONTRACT lineItem (VNPay): ${item.item} = ${itemTotal}`);
+            });
+            amountDue = totalFromLineItems;
+            console.log("📋 CONTRACT bill (VNPay) - Recalculated amountDue from lineItems:", amountDue, "(DB amountDue:", decToNumber(bill.amountDue), ")");
+        }
+
+        // Với CONTRACT bill status = UNPAID hoặc PENDING_CASH_CONFIRM: amountPaid có thể là số tiền từ RECEIPT bill, không phải số tiền đã thanh toán cho CONTRACT bill
+        // Chỉ trừ amountPaid khi status = PARTIALLY_PAID (đã thanh toán một phần CONTRACT bill)
+        let balance = 0;
+        if (bill.billType === "CONTRACT" && (bill.status === "UNPAID" || bill.status === "PENDING_CASH_CONFIRM")) {
+            // Với UNPAID hoặc PENDING_CASH_CONFIRM: balance = amountDue (từ lineItems)
+            balance = amountDue;
+        } else {
+            // Với các trường hợp khác: balance = amountDue - amountPaid
+            balance = amountDue - decToNumber(bill.amountPaid);
+        }
         console.log("💰 Payment validation - Amount:", amount, "Balance:", balance);
         console.log("📊 Bill details:", {
-            amountDue: decToNumber(bill.amountDue),
+            amountDue: amountDue,
+            amountDueFromDB: decToNumber(bill.amountDue),
             amountPaid: decToNumber(bill.amountPaid),
             balance,
             billType: bill.billType,
             status: bill.status
         });
         
-        // Cho phép thanh toán theo amountDue hoặc balance
-        if (Number(amount) <= 0 || Number(amount) > amountDue + 1) {
-            console.log("❌ Invalid amount - Amount must be between 0 and", amountDue);
-            return res.status(400).json({ error: "Invalid amount", amount, maxAmount: amountDue });
+        // Validate amount
+        if (Number(amount) <= 0 || Number(amount) > balance + 1) {
+            console.log("❌ Invalid amount - Amount must be between 0 and", balance);
+            return res.status(400).json({ error: "Invalid amount", amount, maxAmount: balance });
         }
 
         const providerUpper = provider.toUpperCase();
@@ -375,8 +399,8 @@ export const vnpayReturn = async (req, res) => {
                     }
                 }
                 
-                // Ưu tiên returnUrl đã lưu, fallback về default
-                const returnUrl = savedReturnUrl || `${process.env.FRONTEND_URL || "http://localhost:5173"}/admin/checkins`;
+                // Ưu tiên returnUrl đã lưu, fallback về /invoices
+                const returnUrl = savedReturnUrl || `${process.env.FRONTEND_URL || "http://localhost:5173"}/invoices`;
                 console.log("🔗 Using returnUrl:", returnUrl);
                 const redirectUrl = `${returnUrl}?payment=success&provider=vnpay&transactionId=${txnRef}`;
                 console.log("➡️ Redirecting to:", redirectUrl);
