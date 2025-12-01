@@ -99,9 +99,13 @@ export const getAllComplaints = async (req, res) => {
   }
 };
 
-// Lấy complaint theo tenantId (Client)
+
+/**
+ * Lấy complaint theo tenantId (Client – người thuê xem khiếu nại của chính mình)
+ */
 export const getComplaintsByTenantId = async (req, res) => {
   try {
+    // Phân trang
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.max(1, parseInt(req.query.limit) || 10);
     const skip = (page - 1) * limit;
