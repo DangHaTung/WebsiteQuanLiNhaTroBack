@@ -54,6 +54,12 @@ export const createCashCheckin = async (req, res) => {
       return res.status(400).json({ success: false, message: "roomId, checkinDate, duration, deposit are required" });
     }
 
+    // Validate tiền cọc tối thiểu 500,000 VNĐ
+    const depositNum = Number(deposit);
+    if (isNaN(depositNum) || depositNum < 500000) {
+      return res.status(400).json({ success: false, message: "Tiền cọc giữ phòng tối thiểu là 500,000 VNĐ" });
+    }
+
     // Validate upload ảnh CCCD
     if (!req.files || !req.files.cccdFront || !req.files.cccdBack) {
       return res.status(400).json({ success: false, message: "Vui lòng upload đầy đủ ảnh CCCD mặt trước và mặt sau" });
@@ -113,9 +119,11 @@ export const createCashCheckin = async (req, res) => {
         identityNo: identityNo || "",
         fullName: tenantInfo?.fullName || "",
         phone: tenantInfo?.phone || "",
-        address: address || tenantInfo?.address || "",
+        address: (address && address.trim()) || (tenantInfo?.address && tenantInfo.address.trim()) || "",
       },
-      initialElectricReading: initialElectricReading ? Number(initialElectricReading) : undefined,
+      initialElectricReading: initialElectricReading !== undefined && initialElectricReading !== null && initialElectricReading !== "" 
+        ? Number(initialElectricReading) 
+        : undefined,
       cccdImages,
       notes,
       status: "CREATED",
@@ -212,8 +220,25 @@ export const createOnlineCheckin = async (req, res) => {
       tenantId,
     } = req.body || {};
 
+    // Debug log
+    console.log("createOnlineCheckin - req.body:", {
+      roomId,
+      checkinDate,
+      duration,
+      deposit,
+      address,
+      initialElectricReading,
+      tenantId,
+    });
+
     if (!roomId || !checkinDate || !duration || deposit === undefined) {
       return res.status(400).json({ success: false, message: "roomId, checkinDate, duration, deposit are required" });
+    }
+
+    // Validate tiền cọc tối thiểu 500,000 VNĐ
+    const depositNum = Number(deposit);
+    if (isNaN(depositNum) || depositNum < 500000) {
+      return res.status(400).json({ success: false, message: "Tiền cọc giữ phòng tối thiểu là 500,000 VNĐ" });
     }
 
     // Kiểm tra upload ảnh CCCD
@@ -273,9 +298,11 @@ export const createOnlineCheckin = async (req, res) => {
         identityNo: identityNo || "",
         fullName: tenantInfo?.fullName || "",
         phone: tenantInfo?.phone || "",
-        address: address || tenantInfo?.address || "",
+        address: (address && address.trim()) || (tenantInfo?.address && tenantInfo.address.trim()) || "",
       },
-      initialElectricReading: initialElectricReading ? Number(initialElectricReading) : undefined,
+      initialElectricReading: initialElectricReading !== undefined && initialElectricReading !== null && initialElectricReading !== "" 
+        ? Number(initialElectricReading) 
+        : undefined,
       cccdImages,
       notes,
       status: "CREATED",
@@ -500,15 +527,16 @@ export const getAllCheckins = async (req, res) => {
     const isAdmin = req.user?.role === "ADMIN";
     if (!isAdmin) return res.status(403).json({ success: false, message: "Forbidden" });
 
-    const { page = 1, limit = 10, status } = req.query;
+    const { page = 1, limit = 10, status, contractId } = req.query;
     const skip = (page - 1) * limit;
 
     const filter = {};
     if (status) filter.status = status;
+    if (contractId) filter.contractId = contractId;
 
     const checkins = await Checkin.find(filter)
       .populate("tenantId", "fullName email phone role")
-      .populate("staffId", "fullName email role")
+      .populate("staffId", "fullName email phone role")
       .populate("roomId", "roomNumber pricePerMonth type floor areaM2")
       .populate("contractId")
       .populate("receiptBillId")
@@ -518,11 +546,15 @@ export const getAllCheckins = async (req, res) => {
 
     const total = await Checkin.countDocuments(filter);
 
-    // Convert Decimal128 to numbers
+    // Convert Decimal128 to numbers and ensure all fields are included
     const formattedCheckins = checkins.map(c => {
       const obj = c.toObject();
       obj.deposit = obj.deposit ? parseFloat(obj.deposit.toString()) : 0;
       obj.monthlyRent = obj.monthlyRent ? parseFloat(obj.monthlyRent.toString()) : 0;
+      // Ensure initialElectricReading is included if it exists
+      if (obj.initialElectricReading !== undefined && obj.initialElectricReading !== null) {
+        obj.initialElectricReading = Number(obj.initialElectricReading);
+      }
       return obj;
     });
 

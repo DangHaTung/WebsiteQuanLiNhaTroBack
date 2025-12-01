@@ -482,7 +482,7 @@ export const zaloReturn = async (req, res) => {
       const savedReturnUrl = payment.metadata?.returnUrl;
       console.log("💾 Saved returnUrl:", savedReturnUrl);
       
-      const frontendReturnUrl = savedReturnUrl || `${process.env.FRONTEND_URL || "http://localhost:5173"}/admin/checkins`;
+      const frontendReturnUrl = savedReturnUrl || `${process.env.FRONTEND_URL || "http://localhost:5173"}/invoices`;
       const redirectUrl = `${frontendReturnUrl}?payment=success&provider=zalopay&transactionId=${apptransid}`;
       console.log("🔗 Redirecting to:", redirectUrl);
       

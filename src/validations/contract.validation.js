@@ -38,11 +38,13 @@ export const createContractSchema = Joi.object({
 
   deposit: Joi.number()
     .positive()
+    .min(500000)
     .precision(2)
     .required()
     .messages({
       'number.base': 'Deposit phải là số',
       'number.positive': 'Deposit phải là số dương',
+      'number.min': 'Tiền cọc giữ phòng tối thiểu là 500,000 VNĐ',
       'any.required': 'Deposit là bắt buộc',
     }),
 

@@ -60,7 +60,8 @@ export const getAllRooms = async (req, res) => {
 
         const total = await Room.countDocuments(filter);
 
-        // Đếm số người ở cho mỗi phòng (từ Contract)
+        // Đếm số người ở cho mỗi phòng (từ FinalContract SIGNED hoặc room.occupantCount)
+        const FinalContract = (await import("../models/finalContract.model.js")).default;
         const Contract = (await import("../models/contract.model.js")).default;
         const Bill = (await import("../models/bill.model.js")).default;
         const Checkin = (await import("../models/checkin.model.js")).default;
@@ -68,51 +69,71 @@ export const getAllRooms = async (req, res) => {
         const roomsData = await Promise.all(rooms.map(async (room) => {
             const formatted = formatRoom(room);
             
-            // Nếu phòng đã được cọc (DEPOSITED) thì occupantCount = 0
-            if (room.status === "DEPOSITED") {
-                formatted.occupantCount = 0;
-            } else {
-                // Kiểm tra xem có receipt bill chưa thanh toán không
-                // Nếu có receipt chưa thanh toán (UNPAID hoặc PENDING_CASH_CONFIRM), thì occupantCount = 0
-                const checkinWithUnpaidReceipt = await Checkin.findOne({
+            // Bỏ qua phòng đang bảo trì (MAINTENANCE) - không cần kiểm tra
+            if (room.status === "MAINTENANCE") {
+                formatted.occupantCount = room.occupantCount || 0;
+                return formatted;
+            }
+            
+            // Kiểm tra dữ liệu thực tế từ các bảng liên quan
+            // 1. Kiểm tra có FinalContract SIGNED không
+            const signedContractsCount = await FinalContract.countDocuments({
                     roomId: room._id,
-                    status: "CREATED", // Chưa hoàn thành
-                    receiptBillId: { $exists: true }
-                });
-                
-                if (checkinWithUnpaidReceipt && checkinWithUnpaidReceipt.receiptBillId) {
-                    const receiptBill = await Bill.findById(checkinWithUnpaidReceipt.receiptBillId);
-                    if (receiptBill && (receiptBill.status === "UNPAID" || receiptBill.status === "PENDING_CASH_CONFIRM")) {
-                        // Có receipt chưa thanh toán → occupantCount = 0
-                        formatted.occupantCount = 0;
-                    } else {
-                        // Receipt đã thanh toán → tính từ contract
+                status: "SIGNED",
+                tenantId: { $exists: true, $ne: null }
+            });
+            
+            // 2. Kiểm tra có Contract ACTIVE không
                         const activeContract = await Contract.findOne({
                             roomId: room._id,
                             status: "ACTIVE"
                         });
                         
-                        if (activeContract) {
-                            const coTenantsCount = activeContract.coTenants?.filter(ct => !ct.leftAt).length || 0;
-                            formatted.occupantCount = 1 + coTenantsCount;
-                        } else {
-                            formatted.occupantCount = room.occupantCount || 0;
-                        }
-                    }
+            // 3. Kiểm tra có Checkin với receipt bill chưa thanh toán không
+            const checkinWithUnpaidReceipt = await Checkin.findOne({
+                roomId: room._id,
+                status: "CREATED",
+                receiptBillId: { $exists: true }
+            });
+            
+            let hasUnpaidReceipt = false;
+            if (checkinWithUnpaidReceipt && checkinWithUnpaidReceipt.receiptBillId) {
+                const receiptBill = await Bill.findById(checkinWithUnpaidReceipt.receiptBillId);
+                if (receiptBill && (receiptBill.status === "UNPAID" || receiptBill.status === "PENDING_CASH_CONFIRM")) {
+                    hasUnpaidReceipt = true;
+                }
+            }
+            
+            // Xác định status và occupantCount dựa trên dữ liệu thực tế
+            if (signedContractsCount > 0) {
+                // Có FinalContract SIGNED → phòng đang thuê
+                formatted.status = "OCCUPIED";
+                formatted.occupantCount = signedContractsCount;
+            } else if (hasUnpaidReceipt) {
+                // Có receipt chưa thanh toán → phòng đã được cọc
+                formatted.status = "DEPOSITED";
+                formatted.occupantCount = 0;
+            } else if (activeContract) {
+                // Có Contract ACTIVE (nhưng chưa có FinalContract SIGNED) → có thể là DEPOSITED hoặc đang xử lý
+                formatted.status = "DEPOSITED";
+                formatted.occupantCount = 0;
                 } else {
-                    // Không có checkin hoặc đã hoàn thành → tính từ contract
-                    const activeContract = await Contract.findOne({
-                        roomId: room._id,
-                        status: "ACTIVE"
+                // Không có dữ liệu liên quan → phòng còn trống
+                formatted.status = "AVAILABLE";
+                formatted.occupantCount = 0;
+            }
+            
+            // Tự động cập nhật lại database nếu status/occupantCount trong DB khác với thực tế
+            // (Trừ khi phòng đang bảo trì)
+            if (room.status !== formatted.status || (room.occupantCount || 0) !== formatted.occupantCount) {
+                try {
+                    await Room.findByIdAndUpdate(room._id, {
+                        status: formatted.status,
+                        occupantCount: formatted.occupantCount
                     });
-                    
-                    if (activeContract) {
-                        // Đếm: 1 người thuê chính + số người ở cùng (chưa rời đi)
-                        const coTenantsCount = activeContract.coTenants?.filter(ct => !ct.leftAt).length || 0;
-                        formatted.occupantCount = 1 + coTenantsCount; // 1 = người thuê chính
-                    } else {
-                        formatted.occupantCount = room.occupantCount || 0;
-                    }
+                    console.log(`✅ Auto-updated room ${room.roomNumber}: status=${room.status}→${formatted.status}, occupantCount=${room.occupantCount || 0}→${formatted.occupantCount}`);
+                } catch (err) {
+                    console.warn(`⚠️ Cannot auto-update room ${room.roomNumber}:`, err);
                 }
             }
             

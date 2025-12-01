@@ -71,6 +71,9 @@ const checkinSchema = new Schema(
 
     // Thời điểm thanh toán phiếu thu (để tính thời hạn 3 ngày)
     receiptPaidAt: { type: Date },
+
+    // Số điện chốt ban đầu khi check-in (để tính số điện tiêu thụ cho hóa đơn hàng tháng)
+    initialElectricReading: { type: Number },
   },
   { timestamps: { createdAt: true, updatedAt: false }, versionKey: false }
 );
