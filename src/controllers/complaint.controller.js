@@ -1,25 +1,31 @@
 import Complaint from "../models/complaint.model.js";
 import User from "../models/user.model.js";
 
-// Tạo complaint mới
+/**
+ * Tạo complaint mới (Client – Người thuê gửi khiếu nại)
+ */
 export const createComplaint = async (req, res) => {
   try {
     const { tenantId, title, description, adminNote } = req.body || {};
     console.log("[createComplaint] payload:", { tenantId, title, description, adminNote });
 
+    // Làm sạch dữ liệu đầu vào
     const safeTitle = typeof title === "string" ? title.trim() : "";
     const safeDesc = typeof description === "string" ? description.trim() : "";
 
+    // Validate độ dài tiêu đề
     if (!safeTitle || safeTitle.length < 3) {
       return res.status(400).json({ success: false, message: "Tiêu đề phải từ 3 ký tự trở lên" });
     }
+    // Validate độ dài mô tả
     if (!safeDesc || safeDesc.length < 10) {
       return res.status(400).json({ success: false, message: "Mô tả phải từ 10 ký tự trở lên" });
     }
 
+    // Tạo khiếu nại mới
     const complaint = new Complaint({
       tenantId,
-      createdBy: req.user?._id, // tài khoản client gửi khiếu nại
+      createdBy: req.user?._id, // User hiện tại gửi complaint
       title: safeTitle,
       description: safeDesc,
       adminNote,
@@ -39,13 +45,18 @@ export const createComplaint = async (req, res) => {
   }
 };
 
-// Lấy tất cả complaints (admin)
+/**
+ * Lấy tất cả complaints (Admin)
+ * Có phân trang + populate thông tin người thuê & người tạo
+ */
 export const getAllComplaints = async (req, res) => {
   try {
+    // Phân trang
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.max(1, parseInt(req.query.limit) || 10);
     const skip = (page - 1) * limit;
 
+    // Debug in ra 3 complaint đầu để kiểm tra có tiêu đề không
     const complaints = await Complaint.find()
       .populate({ path: "tenantId", select: "fullName phone email" })
       .populate({ path: "createdBy", select: "fullName email phone" })
