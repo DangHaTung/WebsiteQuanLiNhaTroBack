@@ -5,6 +5,7 @@ import Room from "../models/room.model.js";
 import Checkin from "../models/checkin.model.js";
 import User from "../models/user.model.js";
 import { buildSampleContractDocBuffer } from "../services/docx.service.js";
+import logService from "../services/log.service.js";
 
 // ==============================
 // Helper functions
@@ -179,6 +180,19 @@ export const createCashCheckin = async (req, res) => {
     checkinRecord.contractId = contract._id;
     checkinRecord.receiptBillId = receiptBill._id;
     await checkinRecord.save();
+
+    // 📝 Log checkin creation
+    await logService.logCreate({
+      entity: 'CHECKIN',
+      entityId: checkinRecord._id,
+      actorId: user._id,
+      data: {
+        roomId: room.roomNumber,
+        deposit: Number(deposit),
+        durationMonths: Number(duration),
+        paymentMethod: 'CASH',
+      },
+    });
 
     return res.status(201).json({
       success: true,

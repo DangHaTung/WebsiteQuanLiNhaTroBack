@@ -2,6 +2,7 @@
 import Room from "../models/room.model.js";
 import mongoose from "mongoose";
 import { v2 as cloudinary } from "cloudinary";
+import logService from "../services/log.service.js";
 
 /**
  * Helper convert Decimal128 sang number
@@ -427,6 +428,19 @@ export const createRoom = async (req, res) => {
 
         const saved = await room.save();
 
+        // 📝 Log room creation
+        await logService.logCreate({
+            entity: 'ROOM',
+            entityId: saved._id,
+            actorId: req.user?._id,
+            data: {
+                roomNumber: saved.roomNumber,
+                type: saved.type,
+                pricePerMonth: convertDecimal128(saved.pricePerMonth),
+                status: saved.status,
+            },
+        });
+
         res.status(201).json({
             message: "Tạo phòng thành công",
             success: true,
@@ -523,10 +537,28 @@ export const updateRoom = async (req, res) => {
             }
         }
 
+        const oldRoom = await Room.findById(id);
         const updated = await Room.findByIdAndUpdate(id, update, { new: true });
         if (!updated) return res.status(404).json({ 
             message: "Không tìm thấy phòng",
             success: false 
+        });
+
+        // 📝 Log room update
+        await logService.logUpdate({
+            entity: 'ROOM',
+            entityId: updated._id,
+            actorId: req.user?._id,
+            before: {
+                roomNumber: oldRoom?.roomNumber,
+                status: oldRoom?.status,
+                pricePerMonth: convertDecimal128(oldRoom?.pricePerMonth),
+            },
+            after: {
+                roomNumber: updated.roomNumber,
+                status: updated.status,
+                pricePerMonth: convertDecimal128(updated.pricePerMonth),
+            },
         });
 
         res.status(200).json({

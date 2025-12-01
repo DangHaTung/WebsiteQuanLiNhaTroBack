@@ -3,6 +3,8 @@ import { v2 as cloudinary } from "cloudinary";
 import FinalContract from "../models/finalContract.model.js";
 import Contract from "../models/contract.model.js";
 import Bill from "../models/bill.model.js";
+import logService from "../services/log.service.js";
+import notificationService from "../services/notification/notification.service.js";
 
 const toDec = (n) => mongoose.Types.Decimal128.fromString(Number(n).toFixed(2));
 const toNum = (d) => (d === null || d === undefined ? 0 : parseFloat(d.toString()));
@@ -236,6 +238,26 @@ export const createFromContract = async (req, res) => {
       { contractId: contract._id },
       { $set: { finalContractId: finalContract._id } }
     );
+
+    // 📝 Log final contract creation
+    await logService.logCreate({
+      entity: 'FINALCONTRACT',
+      entityId: finalContract._id,
+      actorId: req.user?._id,
+      data: {
+        roomId: contract.roomId?.roomNumber,
+        tenantId: tenantForFinal,
+        deposit: toNum(contract.deposit),
+        monthlyRent: toNum(contract.monthlyRent),
+      },
+    });
+
+    // 🔔 Send contract signed notification
+    try {
+      await notificationService.notifyContractSigned(populated);
+    } catch (notifError) {
+      console.error('❌ Error sending contract notification:', notifError.message);
+    }
 
     return res.status(201).json({ success: true, message: "Final contract draft created", data: formatFinalContract(populated) });
   } catch (err) {
