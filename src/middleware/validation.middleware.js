@@ -10,10 +10,12 @@ export const validate = (schema, source = 'body') => {
     const { error, value } = schema.validate(data, {
       abortEarly: false, // Trả về tất cả lỗi
       stripUnknown: true, // Loại bỏ các field không có trong schema
-      allowUnknown: false, // Không cho phép field không xác định
+      allowUnknown: true, // Cho phép field không xác định (như refundQrCode từ multer)
     });
 
     if (error) {
+      console.log('[validation.middleware] Validation error:', error.details);
+      console.log('[validation.middleware] Data being validated:', data);
       const errorMessages = error.details.map(detail => ({
         field: detail.path.join('.'),
         message: detail.message,

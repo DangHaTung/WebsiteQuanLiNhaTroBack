@@ -97,4 +97,30 @@ export const uploadCccdImages = multer({
   { name: "cccdBack", maxCount: 1 },
 ]);
 
+// ===== Move-out Request QR Code Upload =====
+const refundQrCodeStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => {
+    return {
+      folder: "refund_qr_codes",
+      resource_type: "image",
+      format: undefined,
+      public_id: undefined,
+      transformation: [{ quality: "auto:good" }],
+    };
+  },
+});
+
+export const uploadRefundQrCode = multer({
+  storage: refundQrCodeStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (!allowedMimes.includes(file.mimetype)) {
+      return cb(new Error("Chỉ chấp nhận file ảnh (JPEG, PNG, WebP, GIF)"));
+    }
+    cb(null, true);
+  },
+}).single("refundQrCode");
+
 

@@ -63,6 +63,10 @@ app.use("/api/public", publicPaymentRoute); // PUBLIC payment routes (guest chec
 app.use("/api/complaints", complaintPublicRoute); // PUBLIC complaint routes
 
 // Đăng ký PROTECTED routes (cần auth)
+// QUAN TRỌNG: Đặt /api/notifications-crud TRƯỚC các route /api/notifications để tránh conflict
+app.use("/api/notifications-crud", notificationCRUDRoute); // Notification CRUD routes (Client + Admin)
+app.use("/api/notifications", notificationRoute); // Notification routes (Socket.io testing & rent reminders)
+console.log('[index.js] Registering moveOutRequestRoute at /api');
 app.use("/api", moveOutRequestRoute); // Move-out request routes (Client + Admin) - Đặt trước các route khác
 app.use("/api", authRoute);
 app.use("/api", tenantRoute);   // ADMIN tenant routes
@@ -78,8 +82,6 @@ app.use("/api", utilRoute); // ADMIN utility routes
 app.use("/api", utilityFeeRoute); // ADMIN utility fee routes (independent from room utilities)
 app.use("/api", roomFeeRoute); // ADMIN room fee routes
 app.use("/api", monthlyBillRoute); // ADMIN monthly bill generation routes
-app.use("/api/notifications", notificationRoute); // Notification routes (Socket.io testing & rent reminders)
-app.use("/api/notifications-crud", notificationCRUDRoute); // Notification CRUD routes
 
 // Middleware xử lý route không tồn tại
 app.use(notFound);
