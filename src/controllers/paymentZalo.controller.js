@@ -193,8 +193,8 @@ export const createZaloOrder = async (req, res) => {
       amount: mongoose.Types.Decimal128.fromString(Math.round(Number(bill.amountDue)).toFixed(2)),
       status: "PENDING",
       method: "REDIRECT",
-      metadata: { 
-        createdFrom: "createZaloOrder", 
+      metadata: {
+        createdFrom: "createZaloOrder",
         zaloResponse: zaloRes.data,
         returnUrl: returnUrl || null
       },
@@ -303,7 +303,8 @@ export const zaloCallback = async (req, res) => {
       _id: payment._id,
       status: payment.status,
       transactionId: payment.transactionId,
-      billId: payment.billId
+      billId: payment.billId,
+      amount: payment.amount?.toString() || "0"
     });
 
     // Idempotency: nếu đã SUCCESS, return success
@@ -317,6 +318,20 @@ export const zaloCallback = async (req, res) => {
     // ZaloPay type = 1 và amount > 0 là thành công
     if (isSuccess) {
       console.log("✅ ZaloPay payment SUCCESS - Processing...");
+      // Cập nhật payment.amount từ callback data (ZaloPay trả về số tiền thực tế đã thanh toán)
+      // Đảm bảo amount được set đúng trước khi apply
+      const paymentAmount = amount && Number(amount) > 0 ? Number(amount) : Number(payment.amount?.toString() || 0);
+      if (paymentAmount <= 0) {
+        console.error("❌ Invalid payment amount:", { callbackAmount: amount, paymentAmount });
+        result.return_code = 0;
+        result.return_message = "Invalid payment amount";
+        return res.json(result);
+      }
+      
+      // Update payment.amount từ callback data
+      payment.amount = mongoose.Types.Decimal128.fromString(paymentAmount.toFixed(2));
+      console.log("💰 Updated payment amount from callback:", paymentAmount, "->", payment.amount.toString());
+      
       // Apply payment using shared helper (atomic) - tự động cập nhật bill status
       try {
         // Lưu returnUrl trước khi apply
