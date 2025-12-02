@@ -569,6 +569,10 @@ export const getAllCheckins = async (req, res) => {
       if (obj.initialElectricReading !== undefined && obj.initialElectricReading !== null) {
         obj.initialElectricReading = Number(obj.initialElectricReading);
       }
+      // Ensure receiptPaidAt is included if it exists (for calculating expiration deadline)
+      if (obj.receiptPaidAt) {
+        obj.receiptPaidAt = obj.receiptPaidAt;
+      }
       return obj;
     });
 
