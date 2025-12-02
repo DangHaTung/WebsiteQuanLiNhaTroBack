@@ -10,11 +10,15 @@ export const createMoveOutRequestSchema = Joi.object({
       'any.required': 'ContractId là bắt buộc',
     }),
 
-  moveOutDate: Joi.date()
-    .iso()
+  moveOutDate: Joi.alternatives()
+    .try(
+      Joi.date(),
+      Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).messages({
+        'string.pattern.base': 'MoveOutDate phải có định dạng YYYY-MM-DD',
+      })
+    )
     .required()
     .messages({
-      'date.format': 'MoveOutDate phải có định dạng ISO 8601',
       'any.required': 'MoveOutDate là bắt buộc',
     }),
 

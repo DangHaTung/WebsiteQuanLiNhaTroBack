@@ -11,7 +11,12 @@ const convertDecimal128 = (value) => {
 export const createMoveOutRequest = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { contractId, moveOutDate, reason } = req.body;
+    let { contractId, moveOutDate, reason } = req.body;
+
+    // Parse moveOutDate nếu là string (từ FormData)
+    if (typeof moveOutDate === 'string') {
+      moveOutDate = new Date(moveOutDate);
+    }
 
     if (!contractId || !moveOutDate || !reason) {
       return res.status(400).json({
@@ -20,13 +25,60 @@ export const createMoveOutRequest = async (req, res) => {
       });
     }
 
+    // Validate moveOutDate là Date hợp lệ
+    if (isNaN(moveOutDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "moveOutDate phải là ngày hợp lệ",
+      });
+    }
+
+    // Xử lý file QR code nếu có
+    let refundQrCodeData = null;
+    if (req.file) {
+      console.log('[createMoveOutRequest] File received:', {
+        fieldname: req.file.fieldname,
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        path: req.file.path,
+        secure_url: req.file.secure_url,
+        public_id: req.file.public_id,
+      });
+      refundQrCodeData = {
+        url: req.file.path,
+        secure_url: req.file.secure_url || req.file.path,
+        public_id: req.file.public_id,
+        resource_type: req.file.resource_type || "image",
+      };
+      console.log('[createMoveOutRequest] refundQrCodeData:', refundQrCodeData);
+    } else {
+      console.log('[createMoveOutRequest] No file received (req.file is null/undefined)');
+    }
+
     // Tìm FinalContract của user
-    const finalContract = await FinalContract.findById(contractId)
+    // contractId có thể là FinalContract._id hoặc Contract._id (từ originContractId/linkedContractId)
+    // Thử tìm FinalContract bằng contractId trước
+    let finalContract = await FinalContract.findById(contractId)
       .populate("roomId")
       .populate("originContractId")
       .populate("linkedContractId");
 
+    // Nếu không tìm thấy, tìm FinalContract có originContractId hoặc linkedContractId = contractId
     if (!finalContract) {
+      finalContract = await FinalContract.findOne({
+        $or: [
+          { originContractId: contractId },
+          { linkedContractId: contractId }
+        ]
+      })
+        .populate("roomId")
+        .populate("originContractId")
+        .populate("linkedContractId");
+    }
+
+    if (!finalContract) {
+      console.log('[createMoveOutRequest] FinalContract not found for contractId:', contractId);
       return res.status(404).json({
         success: false,
         message: "FinalContract not found",
@@ -81,13 +133,33 @@ export const createMoveOutRequest = async (req, res) => {
     }
 
     // Tạo yêu cầu mới
-    const moveOutRequest = await MoveOutRequest.create({
+    const moveOutRequestData = {
       contractId: contract._id,
       tenantId: userId,
       roomId: finalContract.roomId._id,
       moveOutDate: new Date(moveOutDate),
       reason: reason.trim(),
       status: "PENDING",
+    };
+    
+    // Thêm QR code nếu có
+    if (refundQrCodeData) {
+      moveOutRequestData.refundQrCode = refundQrCodeData;
+      console.log('[createMoveOutRequest] Adding refundQrCode to moveOutRequestData');
+    } else {
+      console.log('[createMoveOutRequest] No refundQrCode to add');
+    }
+    
+    console.log('[createMoveOutRequest] Creating moveOutRequest with data:', {
+      ...moveOutRequestData,
+      refundQrCode: moveOutRequestData.refundQrCode ? 'present' : 'missing',
+    });
+    
+    const moveOutRequest = await MoveOutRequest.create(moveOutRequestData);
+    
+    console.log('[createMoveOutRequest] Created moveOutRequest:', {
+      _id: moveOutRequest._id,
+      refundQrCode: moveOutRequest.refundQrCode ? 'present' : 'missing',
     });
 
     const populated = await MoveOutRequest.findById(moveOutRequest._id)
@@ -202,6 +274,14 @@ export const getAllMoveOutRequests = async (req, res) => {
             finalMonthServiceFee: refund.finalMonthServiceFee ? parseFloat(refund.finalMonthServiceFee.toString()) : 0,
           };
         }
+      }
+      // Đảm bảo refundQrCode được trả về (nếu có)
+      // refundQrCode đã được include tự động vì không có select: false trong schema
+      if (obj.refundQrCode) {
+        console.log('[getAllMoveOutRequests] Found refundQrCode for request:', obj._id);
+        console.log('[getAllMoveOutRequests] refundQrCode data:', JSON.stringify(obj.refundQrCode, null, 2));
+      } else {
+        console.log('[getAllMoveOutRequests] No refundQrCode for request:', obj._id);
       }
       return obj;
     });

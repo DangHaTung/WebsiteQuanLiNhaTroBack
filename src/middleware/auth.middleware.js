@@ -3,12 +3,15 @@ import User from '../models/user.model.js';
 
 // Middleware xác thực JWT
 export const authenticateToken = async (req, res, next) => {
-  console.log('[authenticateToken] headers.authorization=', req.headers.authorization);
+  console.log('[authenticateToken] URL:', req.url);
+  console.log('[authenticateToken] Method:', req.method);
+  console.log('[authenticateToken] headers.authorization=', req.headers.authorization ? 'present' : 'missing');
   try {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
     if (!token) {
+      console.log('[authenticateToken] No token provided');
       return res.status(401).json({
         success: false,
         message: 'Access token không được cung cấp',
@@ -16,19 +19,23 @@ export const authenticateToken = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('[authenticateToken] Token decoded, userId:', decoded.id);
 
     // Tìm user để đảm bảo user vẫn tồn tại
     const user = await User.findById(decoded.id).select('-passwordHash');
     if (!user) {
+      console.log('[authenticateToken] User not found:', decoded.id);
       return res.status(401).json({
         success: false,
         message: 'Token không hợp lệ - User không tồn tại',
       });
     }
 
+    console.log('[authenticateToken] User found:', { _id: user._id, role: user.role });
     req.user = user;
     next();
   } catch (error) {
+    console.error('[authenticateToken] Error:', error.name, error.message);
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({
         success: false,
@@ -53,6 +60,11 @@ export const authenticateToken = async (req, res, next) => {
 // Middleware kiểm tra quyền truy cập
 export const authorize = (...roles) => {
   return (req, res, next) => {
+    console.log('[authorize] URL:', req.url);
+    console.log('[authorize] Method:', req.method);
+    console.log('[authorize] Required roles:', roles);
+    console.log('[authorize] User role:', req.user?.role);
+    
     if (!req.user) {
       return res.status(401).json({
         success: false,
@@ -61,6 +73,7 @@ export const authorize = (...roles) => {
     }
 
     if (!roles.includes(req.user.role)) {
+      console.log('[authorize] Access denied - user role:', req.user.role, 'required:', roles);
       return res.status(403).json({
         success: false,
         message: 'Không có quyền truy cập',
@@ -69,6 +82,7 @@ export const authorize = (...roles) => {
       });
     }
 
+    console.log('[authorize] Access granted');
     next();
   };
 };

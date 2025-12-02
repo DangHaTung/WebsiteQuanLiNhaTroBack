@@ -19,6 +19,12 @@ const moveOutRequestSchema = new Schema(
     processedBy: { type: Schema.Types.ObjectId, ref: "User" }, // Admin/Staff xử lý
     processedAt: { type: Date },
     refundProcessed: { type: Boolean, default: false }, // Đánh dấu đã hoàn cọc
+    refundQrCode: {
+      url: { type: String },
+      secure_url: { type: String },
+      public_id: { type: String },
+      resource_type: { type: String },
+    }, // QR code nhận tiền hoàn cọc (optional)
   },
   { timestamps: true, versionKey: false }
 );

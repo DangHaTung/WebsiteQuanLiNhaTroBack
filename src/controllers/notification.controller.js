@@ -6,6 +6,17 @@ import notificationService from '../services/notification/notification.service.j
  */
 export const getNotifications = async (req, res) => {
   try {
+    // Debug: Log user info
+    console.log('[getNotifications] req.user:', req.user ? { _id: req.user._id, role: req.user.role } : 'null');
+    console.log('[getNotifications] headers.authorization:', req.headers.authorization ? 'present' : 'missing');
+    
+    if (!req.user) {
+      return res.status(403).json({
+        success: false,
+        message: 'Chưa xác thực - req.user không tồn tại',
+      });
+    }
+    
     const userId = req.user._id;
     const { page = 1, limit = 20, isRead, type } = req.query;
 

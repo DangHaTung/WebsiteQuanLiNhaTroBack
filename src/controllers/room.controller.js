@@ -238,21 +238,33 @@ export const getRoomById = async (req, res) => {
 
         // Lấy hợp đồng CHÍNH THỨC (FinalContract) liên quan đến phòng này
         const FinalContract = (await import("../models/finalContract.model.js")).default;
+        const Contract = (await import("../models/contract.model.js")).default;
         const finalContracts = await FinalContract.find({ 
             roomId: id 
         })
             .populate("tenantId", "fullName email phone")
             .populate("roomId", "roomNumber pricePerMonth")
+            .populate({
+                path: "originContractId",
+                select: "tenantSnapshot",
+            })
             .sort({ createdAt: -1 });
 
         // Format FinalContract (hợp đồng chính thức)
         const formatFinalContract = (finalContract) => {
             const obj = finalContract.toObject ? finalContract.toObject() : finalContract;
+            // Lấy tenantSnapshot từ originContractId nếu có
+            let tenantSnapshot = null;
+            if (obj.originContractId && typeof obj.originContractId === 'object' && obj.originContractId.tenantSnapshot) {
+                tenantSnapshot = obj.originContractId.tenantSnapshot;
+            }
+            
             return {
                 _id: obj._id,
                 tenantId: obj.tenantId,
                 roomId: obj.roomId,
                 originContractId: obj.originContractId,
+                tenantSnapshot: tenantSnapshot, // Thêm tenantSnapshot từ originContract
                 startDate: obj.startDate,
                 endDate: obj.endDate,
                 deposit: convertDecimal128(obj.deposit),
@@ -274,7 +286,7 @@ export const getRoomById = async (req, res) => {
             };
         };
 
-        formattedRoom.contracts = finalContracts.map(formatFinalContract);
+        formattedRoom.contracts = await Promise.all(finalContracts.map(formatFinalContract));
 
         // Lấy hóa đơn (bills) liên quan đến phòng này (qua FinalContracts)
         const Bill = (await import("../models/bill.model.js")).default;
