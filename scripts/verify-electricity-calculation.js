@@ -24,7 +24,7 @@ function manualCalculation(kwh, tiers, vatPercent) {
       : (tierMin === 0 ? tierMax : tierMax - tierMin + 1);
     const used = Math.min(remaining, tierCapacity);
     const amount = used * tier.rate;
-    
+    // Ghi nhận vào bảng kê
     breakdown.push({
       tier: idx + 1,
       range: `${tierMin}-${tierMax === Infinity ? '∞' : tierMax}`,
@@ -33,15 +33,15 @@ function manualCalculation(kwh, tiers, vatPercent) {
       rate: tier.rate,
       amount: amount
     });
-    
+    // Hiển thị chi tiết bậc
     console.log(`  Bậc ${idx + 1} (${tierMin}-${tierMax === Infinity ? '∞' : tierMax} kWh):`);
     console.log(`    - Sức chứa bậc: ${tierCapacity === Infinity ? '∞' : tierCapacity} kWh`);
     console.log(`    - Dùng: ${used} kWh × ${tier.rate} đ/kWh = ${amount.toLocaleString('vi-VN')} đ`);
-    
+    // Cộng dồn
     subtotal += amount;
     remaining -= used;
   });
-
+// Tính VAT và tổng
   const vat = Math.round((subtotal * vatPercent) / 100);
   const total = subtotal + vat;
 
@@ -51,7 +51,7 @@ function manualCalculation(kwh, tiers, vatPercent) {
 
   return { breakdown, subtotal, vat, total };
 }
-
+// Hàm chính để kiểm tra
 async function verifyCalculation() {
   try {
     await mongoose.connect(MONGO_URI);
@@ -99,7 +99,7 @@ async function verifyCalculation() {
         console.log(`  Chênh lệch: ${Math.abs(funcResult.total - manualResult.total).toLocaleString('vi-VN')} đ`);
       }
     }
-
+// Ngắt kết nối
     await mongoose.disconnect();
   } catch (error) {
     console.error("❌ Error:", error);
