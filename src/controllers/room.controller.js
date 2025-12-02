@@ -288,11 +288,21 @@ export const getRoomById = async (req, res) => {
 
         formattedRoom.contracts = await Promise.all(finalContracts.map(formatFinalContract));
 
-        // Lấy hóa đơn (bills) liên quan đến phòng này (qua FinalContracts)
+        // Lấy hóa đơn (bills) liên quan đến phòng này
+        // Bao gồm: bills qua finalContractId VÀ bills qua contractId (cho MONTHLY bills)
         const Bill = (await import("../models/bill.model.js")).default;
         const finalContractIds = finalContracts.map(c => c._id);
+        
+        // Lấy tất cả contracts có roomId trùng với phòng này (để lấy MONTHLY bills)
+        const allContracts = await Contract.find({ roomId: id }).select("_id");
+        const allContractIds = allContracts.map(c => c._id.toString());
+        
+        // Tìm bills: qua finalContractId HOẶC qua contractId (cho MONTHLY bills)
         const bills = await Bill.find({ 
-            finalContractId: { $in: finalContractIds }
+            $or: [
+                { finalContractId: { $in: finalContractIds } },
+                { contractId: { $in: allContractIds }, billType: "MONTHLY" }
+            ]
         })
             .populate("contractId")
             .populate("finalContractId")
