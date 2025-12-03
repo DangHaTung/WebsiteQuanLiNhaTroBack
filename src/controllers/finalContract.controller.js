@@ -15,7 +15,7 @@ const toNumber = (v) => {
   // If v is Decimal128 instance or {$numberDecimal: ...}
   try {
     if (typeof v === "object" && "$numberDecimal" in v) return parseFloat(v.$numberDecimal);
-  } catch {}
+  } catch { }
   const s = v?.toString ? v.toString() : String(v);
   const n = parseFloat(s);
   return Number.isNaN(n) ? null : n;
@@ -110,33 +110,33 @@ export const createFromContract = async (req, res) => {
     if (checkin.receiptBillId) {
       // Tìm tất cả FinalContract liên quan đến checkin này (qua contractId)
       const allFinalContractsForCheckin = await FinalContract.find({ originContractId: contract._id });
-      
+
       // Kiểm tra xem có FinalContract nào có bill CONTRACT đã thanh toán không
       for (const fc of allFinalContractsForCheckin) {
-        const existingBills = await Bill.find({ 
+        const existingBills = await Bill.find({
           finalContractId: fc._id,
           billType: "CONTRACT"
         });
         const contractBill = existingBills.find(b => b.billType === "CONTRACT");
-        
+
         // Nếu có bill CONTRACT đã thanh toán, không cho tạo lại
         if (contractBill && contractBill.status === "PAID") {
-          return res.status(400).json({ 
-            success: false, 
-            message: "Không thể tạo lại hóa đơn hợp đồng vì cọc này đã được thanh toán hợp đồng. Vui lòng tạo hợp đồng mới." 
+          return res.status(400).json({
+            success: false,
+            message: "Không thể tạo lại hóa đơn hợp đồng vì cọc này đã được thanh toán hợp đồng. Vui lòng tạo hợp đồng mới."
           });
         }
       }
-      
+
       // Nếu có FinalContract chưa bị hủy và bill chưa thanh toán, vẫn không cho tạo lại (tránh duplicate)
       const activeFinalContract = allFinalContractsForCheckin.find(fc => fc.status !== "CANCELED");
       if (activeFinalContract) {
-        return res.status(400).json({ 
-          success: false, 
-          message: "Đã tồn tại hợp đồng chính thức cho contract này. Vui lòng hủy hợp đồng cũ trước khi tạo lại." 
+        return res.status(400).json({
+          success: false,
+          message: "Đã tồn tại hợp đồng chính thức cho contract này. Vui lòng hủy hợp đồng cũ trước khi tạo lại."
         });
       }
-      
+
       // Nếu tất cả FinalContract đã bị hủy và không có bill CONTRACT nào đã thanh toán, cho phép tạo lại
       if (allFinalContractsForCheckin.length > 0) {
         console.log(`⚠️ Found CANCELED FinalContract(s) for contract ${contract._id}. Allowing recreation because no bill CONTRACT is PAID.`);
@@ -183,7 +183,7 @@ export const createFromContract = async (req, res) => {
     const monthlyRentNum = toNum(contract.monthlyRent);
     const depositRemaining = Math.max(0, monthlyRentNum - receiptBillPaidAmount); // Cọc còn lại phải đóng: 5tr - 500k = 4tr5
     const totalRemainingAmount = monthlyRentNum + depositRemaining; // Tổng còn lại: 5tr + 4tr5 = 9tr5
-    
+
     // Xác định status ban đầu
     // Khi mới tạo: status = UNPAID (chờ thanh toán)
     // Vì các khoản 2 và 3 chưa thanh toán, chỉ có khoản 1 (cọc giữ phòng) đã thanh toán
@@ -305,14 +305,14 @@ export const uploadFiles = async (req, res) => {
       finalContractId: fc._id,
       billType: "CONTRACT",
     });
-    
+
     if (!contractBill) {
       return res.status(400).json({
         success: false,
         message: "Không tìm thấy hóa đơn tháng đầu (CONTRACT bill)"
       });
     }
-    
+
     if (contractBill.status !== "PAID") {
       return res.status(400).json({
         success: false,
@@ -615,7 +615,7 @@ export const assignTenantToFinalContract = async (req, res) => {
     // Cho phép cập nhật hoặc gán mới
     fc.tenantId = tenantId;
     await fc.save();
-    
+
     // ✅ Cũng update Contract.tenantId để tenant có thể thấy bills
     if (fc.originContractId) {
       try {
@@ -625,7 +625,7 @@ export const assignTenantToFinalContract = async (req, res) => {
         console.warn("Cannot update Contract tenantId:", err);
       }
     }
-    
+
     return res.status(200).json({ success: true, message: "Assigned tenant to final contract", data: formatFinalContract(fc) });
   } catch (err) {
     console.error("assignTenantToFinalContract error:", err);
@@ -643,7 +643,7 @@ export const deleteFileFromFinalContract = async (req, res) => {
     }
 
     // Only admin/staff can delete files on final contracts
-  const isAdmin = req.user?.role === "ADMIN";
+    const isAdmin = req.user?.role === "ADMIN";
     if (!isAdmin) {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
@@ -693,9 +693,9 @@ export const createForCoTenant = async (req, res) => {
     const { linkedContractId, tenantInfo, depositAmount, startDate } = req.body;
 
     if (!linkedContractId || !tenantInfo || !depositAmount) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "linkedContractId, tenantInfo, and depositAmount are required" 
+      return res.status(400).json({
+        success: false,
+        message: "linkedContractId, tenantInfo, and depositAmount are required"
       });
     }
 
@@ -782,14 +782,14 @@ export const cancelFinalContract = async (req, res) => {
     if (fc.status === "CANCELED") {
       return res.status(400).json({ success: false, message: "Final contract already canceled" });
     }
-    
+
     // Hủy tất cả bills CONTRACT liên quan đến FinalContract này (chỉ hủy nếu chưa thanh toán)
     const Bill = (await import("../models/bill.model.js")).default;
-    const bills = await Bill.find({ 
+    const bills = await Bill.find({
       finalContractId: fc._id,
       billType: "CONTRACT"
     });
-    
+
     for (const bill of bills) {
       // Chỉ hủy nếu bill chưa thanh toán hoặc chỉ thanh toán một phần
       if (bill.status !== "PAID") {
@@ -801,49 +801,85 @@ export const cancelFinalContract = async (req, res) => {
         console.log(`⚠️ Không thể hủy bill CONTRACT ${bill._id} vì đã thanh toán`);
       }
     }
-    
+
     fc.status = "CANCELED";
     await fc.save();
-    
-    // Cập nhật trạng thái phòng: kiểm tra xem còn FinalContract SIGNED nào khác trong phòng này không
+
+    // Hủy Contract ACTIVE liên quan (originContractId) để phòng về trạng thái trống
+    const Contract = (await import("../models/contract.model.js")).default;
+    if (fc.originContractId) {
+      const originContractId = typeof fc.originContractId === 'object' && fc.originContractId._id
+        ? fc.originContractId._id
+        : fc.originContractId;
+
+      const originContract = await Contract.findById(originContractId);
+      if (originContract && originContract.status === "ACTIVE") {
+        originContract.status = "CANCELED";
+        await originContract.save();
+        console.log(`✅ Canceled origin Contract ${originContractId} when canceling FinalContract ${fc._id}`);
+      }
+    }
+
+    // Hủy tất cả Contract ACTIVE khác trong cùng phòng (nếu có)
+    const roomId = (fc.roomId && typeof fc.roomId === 'object' && fc.roomId._id)
+      ? fc.roomId._id
+      : (fc.roomId || null);
+
+    if (roomId) {
+      const allActiveContracts = await Contract.find({
+        roomId: roomId,
+        status: "ACTIVE"
+      });
+
+      for (const contract of allActiveContracts) {
+        contract.status = "CANCELED";
+        await contract.save();
+        console.log(`✅ Canceled Contract ${contract._id} in room ${roomId} when canceling FinalContract ${fc._id}`);
+
+        // Hủy Checkin liên quan đến Contract này (nếu có)
+        const Checkin = (await import("../models/checkin.model.js")).default;
+        const checkins = await Checkin.find({
+          contractId: contract._id,
+          status: "CREATED" // Chỉ hủy checkin chưa hoàn tất
+        });
+
+        for (const checkin of checkins) {
+          checkin.status = "CANCELED";
+          await checkin.save();
+          console.log(`✅ Canceled Checkin ${checkin._id} when canceling Contract ${contract._id}`);
+
+          // Hủy receipt bill nếu chưa thanh toán
+          if (checkin.receiptBillId) {
+            const receiptBill = await Bill.findById(checkin.receiptBillId);
+            if (receiptBill && receiptBill.status !== "PAID") {
+              receiptBill.status = "VOID";
+              receiptBill.note = receiptBill.note
+                ? `${receiptBill.note} [Đã hủy do hủy hợp đồng chính thức]`
+                : "Đã hủy do hủy hợp đồng chính thức";
+              await receiptBill.save();
+              console.log(`✅ Canceled receipt bill ${receiptBill._id} when canceling Checkin ${checkin._id}`);
+            }
+          }
+        }
+      }
+    }
+
+    // Cập nhật trạng thái phòng: khi hủy hợp đồng, phòng về trạng thái trống và số người ở về 0
     try {
       const Room = (await import("../models/room.model.js")).default;
-      // Lấy roomId - có thể là object (đã populate) hoặc ObjectId
-      const roomId = (fc.roomId && typeof fc.roomId === 'object' && fc.roomId._id) 
-        ? fc.roomId._id 
-        : (fc.roomId || null);
-      
       if (roomId) {
-        // Đếm số FinalContract SIGNED còn lại trong phòng này (không bao gồm hợp đồng vừa hủy)
-        const remainingSignedContracts = await FinalContract.countDocuments({
-          roomId: roomId,
-          status: "SIGNED",
-          _id: { $ne: fc._id }, // Loại bỏ hợp đồng vừa hủy
-          tenantId: { $exists: true, $ne: null }
+        // Khi hủy hợp đồng, phòng luôn về trạng thái trống và số người ở về 0
+        await Room.findByIdAndUpdate(roomId, {
+          status: "AVAILABLE",
+          occupantCount: 0
         });
-        
-        // Cập nhật phòng dựa trên số hợp đồng SIGNED còn lại
-        if (remainingSignedContracts === 0) {
-          // Không còn hợp đồng SIGNED nào → phòng trở về trạng thái trống
-          await Room.findByIdAndUpdate(roomId, {
-            status: "AVAILABLE",
-            occupantCount: 0
-          });
-          console.log(`✅ Updated room ${roomId} status to AVAILABLE and occupantCount to 0 (no signed contracts remaining)`);
-        } else {
-          // Vẫn còn hợp đồng SIGNED → cập nhật số người ở
-          await Room.findByIdAndUpdate(roomId, {
-            occupantCount: remainingSignedContracts
-          });
-          console.log(`✅ Updated room ${roomId} occupantCount to ${remainingSignedContracts} (${remainingSignedContracts} signed contracts remaining)`);
-        }
+        console.log(`✅ Updated room ${roomId} status to AVAILABLE and occupantCount to 0 (after canceling FinalContract ${fc._id})`);
       } else {
         console.warn(`⚠️ Cannot update room: FinalContract ${fc._id} has no roomId`);
       }
     } catch (err) {
       console.warn("Cannot update room status/occupantCount after canceling contract:", err);
     }
-    
     return res.status(200).json({ success: true, message: "Final contract canceled successfully", data: formatFinalContract(fc) });
   } catch (err) {
     console.error("cancelFinalContract error:", err);
@@ -857,7 +893,7 @@ export const extendContract = async (req, res) => {
   try {
     const { id } = req.params;
     const { extensionMonths } = req.body;
-    
+
     // Validate
     if (!extensionMonths || extensionMonths <= 0) {
       return res.status(400).json({
@@ -865,19 +901,19 @@ export const extendContract = async (req, res) => {
         message: "Số tháng gia hạn không hợp lệ (phải > 0)"
       });
     }
-    
+
     // Tìm FinalContract
     const finalContract = await FinalContract.findById(id)
       .populate("tenantId", "fullName email phone")
       .populate("roomId", "roomNumber");
-      
+
     if (!finalContract) {
       return res.status(404).json({
         success: false,
         message: "Không tìm thấy hợp đồng"
       });
     }
-    
+
     // Chỉ cho phép gia hạn hợp đồng SIGNED
     if (finalContract.status !== "SIGNED") {
       return res.status(400).json({
@@ -885,22 +921,22 @@ export const extendContract = async (req, res) => {
         message: "Chỉ có thể gia hạn hợp đồng đã ký (status = SIGNED)"
       });
     }
-    
+
     // Tính endDate mới
     const currentEndDate = new Date(finalContract.endDate);
     const newEndDate = new Date(currentEndDate);
     newEndDate.setMonth(newEndDate.getMonth() + parseInt(extensionMonths));
-    
+
     // Lưu endDate cũ để log
     const oldEndDate = finalContract.endDate;
-    
+
     // Cập nhật endDate
     finalContract.endDate = newEndDate;
-    
+
     // Lưu lịch sử gia hạn vào metadata
     if (!finalContract.metadata) finalContract.metadata = {};
     if (!finalContract.metadata.extensions) finalContract.metadata.extensions = [];
-    
+
     finalContract.metadata.extensions.push({
       extendedAt: new Date(),
       extendedBy: req.user._id,
@@ -908,9 +944,9 @@ export const extendContract = async (req, res) => {
       newEndDate: newEndDate,
       extensionMonths: parseInt(extensionMonths)
     });
-    
+
     await finalContract.save();
-    
+
     // Cập nhật Contract gốc (nếu có)
     if (finalContract.originContractId) {
       try {
@@ -922,9 +958,9 @@ export const extendContract = async (req, res) => {
         console.warn("Cannot update origin Contract endDate:", err);
       }
     }
-    
+
     console.log(`✅ Extended FinalContract ${id}: ${oldEndDate} → ${newEndDate} (+${extensionMonths} months)`);
-    
+
     return res.status(200).json({
       success: true,
       message: `Gia hạn hợp đồng thành công thêm ${extensionMonths} tháng`,
@@ -954,14 +990,14 @@ export const extendContract = async (req, res) => {
 export const getExpiringSoonContracts = async (req, res) => {
   try {
     const { days = 30 } = req.query;
-    
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + parseInt(days));
     futureDate.setHours(23, 59, 59, 999);
-    
+
     const contracts = await FinalContract.find({
       status: "SIGNED",
       endDate: {
@@ -969,13 +1005,13 @@ export const getExpiringSoonContracts = async (req, res) => {
         $lte: futureDate
       }
     })
-    .populate("tenantId", "fullName email phone")
-    .populate("roomId", "roomNumber pricePerMonth")
-    .populate("originContractId")
-    .sort({ endDate: 1 });
-    
+      .populate("tenantId", "fullName email phone")
+      .populate("roomId", "roomNumber pricePerMonth")
+      .populate("originContractId")
+      .sort({ endDate: 1 });
+
     const formattedContracts = contracts.map(formatFinalContract);
-    
+
     return res.status(200).json({
       success: true,
       message: `Tìm thấy ${contracts.length} hợp đồng sắp hết hạn trong ${days} ngày tới`,
