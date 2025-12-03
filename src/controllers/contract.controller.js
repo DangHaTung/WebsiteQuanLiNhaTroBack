@@ -620,13 +620,36 @@ export const addCoTenant = async (req, res) => {
       });
     }
 
-    const contract = await Contract.findById(id);
+    const contract = await Contract.findById(id).populate("roomId");
     if (!contract) {
       return res.status(404).json({ success: false, message: "Contract not found" });
     }
 
+    // Validate loại phòng
+    const room = contract.roomId;
+    if (!room) {
+      return res.status(404).json({ success: false, message: "Room not found" });
+    }
+
+    // Phòng đơn (SINGLE) không được thêm người ở cùng
+    if (room.type === "SINGLE") {
+      return res.status(400).json({
+        success: false,
+        message: "Phòng đơn không thể thêm người ở cùng",
+      });
+    }
+
+    // Phòng đôi (DOUBLE) chỉ được thêm 1 người ở cùng
+    const currentCoTenantsCount = contract.coTenants?.filter(ct => !ct.leftAt).length || 0;
+    if (room.type === "DOUBLE" && currentCoTenantsCount >= 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Phòng đôi chỉ được thêm tối đa 1 người ở cùng",
+      });
+    }
+
     // Kiểm tra đã tồn tại chưa (theo phone)
-    const exists = contract.coTenants?.find((ct) => ct.phone === phone);
+    const exists = contract.coTenants?.find((ct) => ct.phone === phone && !ct.leftAt);
     if (exists) {
       return res.status(400).json({
         success: false,
@@ -675,7 +698,17 @@ export const addCoTenant = async (req, res) => {
 
     await contract.save();
 
-    console.log(`✅ Added co-tenant ${fullName} to contract ${id}`);
+    // Cập nhật occupantCount của phòng
+    const Room = (await import("../models/room.model.js")).default;
+    const activeCoTenantsCount = contract.coTenants?.filter(ct => !ct.leftAt).length || 0;
+    // occupantCount = 1 (người thuê chính) + số người ở cùng
+    const newOccupantCount = 1 + activeCoTenantsCount;
+    
+    await Room.findByIdAndUpdate(room._id, {
+      occupantCount: newOccupantCount
+    });
+
+    console.log(`✅ Added co-tenant ${fullName} to contract ${id}, updated room ${room.roomNumber} occupantCount to ${newOccupantCount}`);
 
     return res.status(200).json({
       success: true,

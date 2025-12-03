@@ -1113,17 +1113,15 @@ export const requestCashPayment = async (req, res) => {
       }
     }
 
-    // 2. Kiểm tra contractId.tenantId (bao gồm co-tenant)
+    // 2. Kiểm tra contractId.tenantId (CHỈ cho phép main tenant, KHÔNG cho co-tenant)
     if (!hasPermission && bill.contractId) {
       const contract = await Contract.findById(
         bill.contractId._id || bill.contractId
       ).lean();
       if (contract) {
         const contractTenantId = contract.tenantId?.toString();
-        const isCoTenant = contract.coTenants?.some(
-          (ct) => ct.userId?.toString() === userIdStr
-        );
-        if (contractTenantId === userIdStr || isCoTenant) {
+        // Chỉ cho phép main tenant (contract.tenantId), KHÔNG cho co-tenant
+        if (contractTenantId === userIdStr) {
           hasPermission = true;
         }
       }
