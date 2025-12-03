@@ -24,7 +24,7 @@ export const getAllUsers = async (req, res) => {
     }
 
     // Phân quyền dữ liệu theo role
-    let selectFields = "fullName email phone role createdAt";
+    let selectFields = "fullName email phone role createdAt isLocked";
     
    
     
@@ -37,6 +37,10 @@ export const getAllUsers = async (req, res) => {
     else if (req.user.role === 'TENANT' || req.user.role === 'tenant') {
       selectFields = "fullName phone role createdAt";
 
+    }
+    // Nếu là ADMIN, hiển thị đầy đủ thông tin bao gồm isLocked
+    else if (req.user.role === 'ADMIN' || req.user.role === 'admin') {
+      selectFields = "fullName email phone role createdAt isLocked";
     }
     else {
       console.log("Debug getAllUsers - Other role access, selectFields:", selectFields);
@@ -258,6 +262,43 @@ export const activateTenantIfContractBillPaid = async (req, res) => {
     return res.status(200).json({ success: true, message: "Đã kích hoạt tài khoản Tenant", data: { _id: user._id, id: user._id, isActive: user.isActive } });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Lỗi khi kích hoạt tài khoản", error: error.message });
+  }
+};
+
+// Khóa/Mở khóa tài khoản
+export const toggleUserLock = async (req, res) => {
+  try {
+    if (!req.user || req.user.role.toUpperCase() !== "ADMIN") {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền khóa/mở khóa tài khoản" });
+    }
+
+    const { id } = req.params;
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy người dùng" });
+    }
+
+    // Không cho phép khóa tài khoản admin
+    if (user.role.toUpperCase() === "ADMIN") {
+      return res.status(400).json({ success: false, message: "Không thể khóa tài khoản quản trị viên" });
+    }
+
+    // Toggle lock status
+    user.isLocked = !user.isLocked;
+    await user.save();
+
+    const action = user.isLocked ? "khóa" : "mở khóa";
+    return res.status(200).json({
+      success: true,
+      message: `${action.charAt(0).toUpperCase() + action.slice(1)} tài khoản thành công`,
+      data: {
+        _id: user._id,
+        id: user._id,
+        isLocked: user.isLocked,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Lỗi khi khóa/mở khóa tài khoản", error: error.message });
   }
 };
 

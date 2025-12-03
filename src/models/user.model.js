@@ -40,6 +40,12 @@ const userSchema = new Schema(
       default: true,
       index: true,
     },
+    // Cờ khóa tài khoản (admin có thể khóa/mở khóa)
+    isLocked: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   {
     timestamps: { createdAt: "createdAt", updatedAt: false }, // chỉ cần createdAt
