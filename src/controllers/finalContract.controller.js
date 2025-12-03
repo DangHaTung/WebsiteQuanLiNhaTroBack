@@ -805,27 +805,31 @@ export const cancelFinalContract = async (req, res) => {
     fc.status = "CANCELED";
     await fc.save();
 
-    // Hủy Contract ACTIVE liên quan (originContractId) để phòng về trạng thái trống
-    const Contract = (await import("../models/contract.model.js")).default;
-    if (fc.originContractId) {
-      const originContractId = typeof fc.originContractId === 'object' && fc.originContractId._id
-        ? fc.originContractId._id
-        : fc.originContractId;
-
-      const originContract = await Contract.findById(originContractId);
-      if (originContract && originContract.status === "ACTIVE") {
-        originContract.status = "CANCELED";
-        await originContract.save();
-        console.log(`✅ Canceled origin Contract ${originContractId} when canceling FinalContract ${fc._id}`);
-      }
-    }
-
-    // Hủy tất cả Contract ACTIVE khác trong cùng phòng (nếu có)
+    // Lấy roomId để xử lý
     const roomId = (fc.roomId && typeof fc.roomId === 'object' && fc.roomId._id)
       ? fc.roomId._id
       : (fc.roomId || null);
 
+    // Hủy Contract ACTIVE liên quan (originContractId) và tất cả Contract ACTIVE trong phòng
+    const Contract = (await import("../models/contract.model.js")).default;
+    const Checkin = (await import("../models/checkin.model.js")).default;
+
     if (roomId) {
+      // Hủy Contract ACTIVE liên quan (originContractId)
+      if (fc.originContractId) {
+        const originContractId = typeof fc.originContractId === 'object' && fc.originContractId._id
+          ? fc.originContractId._id
+          : fc.originContractId;
+
+        const originContract = await Contract.findById(originContractId);
+        if (originContract && originContract.status === "ACTIVE") {
+          originContract.status = "CANCELED";
+          await originContract.save();
+          console.log(`✅ Canceled origin Contract ${originContractId} when canceling FinalContract ${fc._id}`);
+        }
+      }
+
+      // Hủy tất cả Contract ACTIVE khác trong cùng phòng
       const allActiveContracts = await Contract.find({
         roomId: roomId,
         status: "ACTIVE"
@@ -836,11 +840,10 @@ export const cancelFinalContract = async (req, res) => {
         await contract.save();
         console.log(`✅ Canceled Contract ${contract._id} in room ${roomId} when canceling FinalContract ${fc._id}`);
 
-        // Hủy Checkin liên quan đến Contract này (nếu có)
-        const Checkin = (await import("../models/checkin.model.js")).default;
+        // Hủy Checkin CREATED liên quan đến Contract này
         const checkins = await Checkin.find({
           contractId: contract._id,
-          status: "CREATED" // Chỉ hủy checkin chưa hoàn tất
+          status: "CREATED"
         });
 
         for (const checkin of checkins) {
@@ -867,6 +870,7 @@ export const cancelFinalContract = async (req, res) => {
     // Cập nhật trạng thái phòng: khi hủy hợp đồng, phòng về trạng thái trống và số người ở về 0
     try {
       const Room = (await import("../models/room.model.js")).default;
+      
       if (roomId) {
         // Khi hủy hợp đồng, phòng luôn về trạng thái trống và số người ở về 0
         await Room.findByIdAndUpdate(roomId, {
@@ -880,6 +884,7 @@ export const cancelFinalContract = async (req, res) => {
     } catch (err) {
       console.warn("Cannot update room status/occupantCount after canceling contract:", err);
     }
+    
     return res.status(200).json({ success: true, message: "Final contract canceled successfully", data: formatFinalContract(fc) });
   } catch (err) {
     console.error("cancelFinalContract error:", err);
