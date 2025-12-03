@@ -109,7 +109,13 @@ export const getAllRooms = async (req, res) => {
             if (signedContractsCount > 0) {
                 // Có FinalContract SIGNED → phòng đang thuê
                 formatted.status = "OCCUPIED";
-                formatted.occupantCount = signedContractsCount;
+                // Tính occupantCount: 1 người thuê chính + số người ở cùng (co-tenants)
+                let totalOccupants = signedContractsCount;
+                if (activeContract && activeContract.coTenants) {
+                    const activeCoTenants = activeContract.coTenants.filter(ct => !ct.leftAt);
+                    totalOccupants = signedContractsCount + activeCoTenants.length;
+                }
+                formatted.occupantCount = totalOccupants;
             } else if (hasUnpaidReceipt) {
                 // Có receipt chưa thanh toán → phòng đã được cọc
                 formatted.status = "DEPOSITED";
@@ -117,7 +123,15 @@ export const getAllRooms = async (req, res) => {
             } else if (activeContract) {
                 // Có Contract ACTIVE (nhưng chưa có FinalContract SIGNED) → có thể là DEPOSITED hoặc đang xử lý
                 formatted.status = "DEPOSITED";
-                formatted.occupantCount = 0;
+                // Tính occupantCount từ co-tenants nếu có
+                let totalOccupants = 0;
+                if (activeContract.coTenants) {
+                    const activeCoTenants = activeContract.coTenants.filter(ct => !ct.leftAt);
+                    totalOccupants = 1 + activeCoTenants.length; // 1 người thuê chính + co-tenants
+                } else {
+                    totalOccupants = 1; // Chỉ có người thuê chính
+                }
+                formatted.occupantCount = totalOccupants;
                 } else {
                 // Không có dữ liệu liên quan → phòng còn trống
                 formatted.status = "AVAILABLE";
@@ -296,6 +310,19 @@ export const getRoomById = async (req, res) => {
         // Lấy tất cả contracts có roomId trùng với phòng này (để lấy MONTHLY bills)
         const allContracts = await Contract.find({ roomId: id }).select("_id");
         const allContractIds = allContracts.map(c => c._id.toString());
+        
+        // Lấy contract ACTIVE với co-tenants để hiển thị trong RoomDetailDrawer
+        const activeContract = await Contract.findOne({ 
+            roomId: id, 
+            status: "ACTIVE" 
+        }).select("coTenants");
+        
+        if (activeContract) {
+            formattedRoom.activeContract = {
+                _id: activeContract._id,
+                coTenants: activeContract.coTenants || []
+            };
+        }
         
         // Tìm bills: qua finalContractId HOẶC qua contractId (cho MONTHLY bills)
         const bills = await Bill.find({ 

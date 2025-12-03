@@ -297,8 +297,63 @@ export const createPayment = async (req, res) => {
         const { billId, amount, provider = "VNPAY", bankCode, returnUrl } = req.body;
         if (!billId || !amount) return res.status(400).json({ error: "billId and amount required" });
 
-        const bill = await Bill.findById(billId);
+        const bill = await Bill.findById(billId)
+          .populate("tenantId")
+          .populate({
+            path: "contractId",
+            populate: { path: "tenantId" },
+          })
+          .populate({
+            path: "finalContractId",
+            populate: { path: "tenantId" },
+          });
         if (!bill) return res.status(404).json({ error: "Bill not found" });
+
+        // Kiểm tra quyền: chỉ cho phép main tenant thanh toán, không cho co-tenant
+        const userId = req.user._id.toString();
+        let hasPermission = false;
+
+        // 1. Kiểm tra bill.tenantId (cho RECEIPT bills)
+        if (bill.tenantId) {
+          const billTenantId = typeof bill.tenantId === "object"
+            ? bill.tenantId._id?.toString()
+            : bill.tenantId.toString();
+          if (billTenantId === userId) {
+            hasPermission = true;
+          }
+        }
+
+        // 2. Kiểm tra contractId.tenantId (CHỈ cho phép main tenant)
+        if (!hasPermission && bill.contractId) {
+          const Contract = (await import("../models/contract.model.js")).default;
+          const contract = await Contract.findById(
+            typeof bill.contractId === "object" ? bill.contractId._id : bill.contractId
+          ).lean();
+          if (contract) {
+            const contractTenantId = contract.tenantId?.toString();
+            // Chỉ cho phép main tenant, KHÔNG cho co-tenant
+            if (contractTenantId === userId) {
+              hasPermission = true;
+            }
+          }
+        }
+
+        // 3. Kiểm tra finalContractId.tenantId
+        if (!hasPermission && bill.finalContractId) {
+          const FinalContract = (await import("../models/finalContract.model.js")).default;
+          const finalContract = await FinalContract.findById(
+            typeof bill.finalContractId === "object" ? bill.finalContractId._id : bill.finalContractId
+          ).lean();
+          if (finalContract && finalContract.tenantId?.toString() === userId) {
+            hasPermission = true;
+          }
+        }
+
+        if (!hasPermission) {
+          return res.status(403).json({ 
+            error: "Chỉ người đại diện (người làm hợp đồng) mới có thể thanh toán hóa đơn này" 
+          });
+        }
 
         // Với CONTRACT bill: tính lại amountDue từ lineItems để đảm bảo chính xác
         let amountDue = decToNumber(bill.amountDue);
