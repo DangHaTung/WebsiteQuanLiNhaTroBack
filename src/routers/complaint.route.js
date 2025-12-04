@@ -19,7 +19,7 @@ const router = express.Router();
 // Test ping
 router.get("/_ping", (req, res) => res.json({ ok: true, message: "complaint admin route alive" }));
 
-// Get all complaints (ADMIN ONLY)
+// Get all complaints (ADMIN)
 router.get(
   "/",
   authenticateToken,

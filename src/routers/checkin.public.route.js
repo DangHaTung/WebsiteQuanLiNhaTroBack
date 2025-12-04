@@ -6,7 +6,7 @@ import { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSam
 
 const router = express.Router();
 
-// Get all checkins (Admin only)
+// Get all checkins (Admin)
 router.get("/checkins", authenticateToken, authorize('ADMIN'), asyncHandler(getAllCheckins));
 
 // Tạo hợp đồng + hóa đơn (đặt cọc + tháng đầu) khi thanh toán tiền mặt
