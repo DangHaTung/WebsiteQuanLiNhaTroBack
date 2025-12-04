@@ -55,6 +55,15 @@ export const createCashCheckin = async (req, res) => {
       return res.status(400).json({ success: false, message: "roomId, checkinDate, duration, deposit are required" });
     }
 
+    // Validate thời hạn thuê: tối thiểu 1 tháng, tối đa 36 tháng (3 năm)
+    const durationNum = Number(duration);
+    if (isNaN(durationNum) || durationNum < 1) {
+      return res.status(400).json({ success: false, message: "Thời hạn thuê tối thiểu là 1 tháng" });
+    }
+    if (durationNum > 36) {
+      return res.status(400).json({ success: false, message: "Thời hạn thuê tối đa là 36 tháng (3 năm)" });
+    }
+
     // Validate tiền cọc tối thiểu 500,000 VNĐ
     const depositNum = Number(deposit);
     if (isNaN(depositNum) || depositNum < 500000) {
@@ -247,6 +256,15 @@ export const createOnlineCheckin = async (req, res) => {
 
     if (!roomId || !checkinDate || !duration || deposit === undefined) {
       return res.status(400).json({ success: false, message: "roomId, checkinDate, duration, deposit are required" });
+    }
+
+    // Validate thời hạn thuê: tối thiểu 1 tháng, tối đa 36 tháng (3 năm)
+    const durationNum = Number(duration);
+    if (isNaN(durationNum) || durationNum < 1) {
+      return res.status(400).json({ success: false, message: "Thời hạn thuê tối thiểu là 1 tháng" });
+    }
+    if (durationNum > 36) {
+      return res.status(400).json({ success: false, message: "Thời hạn thuê tối đa là 36 tháng (3 năm)" });
     }
 
     // Validate tiền cọc tối thiểu 500,000 VNĐ
@@ -570,9 +588,8 @@ export const getAllCheckins = async (req, res) => {
         obj.initialElectricReading = Number(obj.initialElectricReading);
       }
       // Ensure receiptPaidAt is included if it exists (for calculating expiration deadline)
-      if (obj.receiptPaidAt) {
-        obj.receiptPaidAt = obj.receiptPaidAt;
-      }
+      // Luôn trả về receiptPaidAt nếu có (không cần check if)
+      obj.receiptPaidAt = obj.receiptPaidAt || null;
       return obj;
     });
 
@@ -624,4 +641,216 @@ export const completeCheckin = async (req, res) => {
   }
 };
 
-export default { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSampleDocx, cancelCheckin, getAllCheckins, completeCheckin };
+// Gia hạn phiếu thu - thêm tiền cọc và thời hạn
+export const extendReceipt = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user?._id) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    // Chỉ ADMIN mới được phép gia hạn
+    if (user.role !== "ADMIN") {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const { id: checkinId } = req.params;
+    const { additionalDeposit } = req.body;
+
+    // Validate
+    if (!checkinId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "checkinId is required" 
+      });
+    }
+
+    if (!additionalDeposit) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "additionalDeposit is required" 
+      });
+    }
+
+    // Validate số tiền cọc tối thiểu 500,000 VNĐ
+    const depositNum = Number(additionalDeposit);
+    if (isNaN(depositNum) || depositNum < 500000) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Tiền cọc gia hạn tối thiểu là 500,000 VNĐ" 
+      });
+    }
+
+    // Kiểm tra checkin (populate receiptBillId để lấy ID)
+    const checkin = await Checkin.findById(checkinId).populate("receiptBillId");
+    if (!checkin) {
+      return res.status(404).json({ success: false, message: "Checkin not found" });
+    }
+
+    // Kiểm tra checkin đã thanh toán phiếu thu chưa (phải có receiptPaidAt)
+    if (!checkin.receiptPaidAt) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Chưa thanh toán phiếu thu ban đầu, không thể gia hạn" 
+      });
+    }
+
+    // Kiểm tra contract
+    const contract = await Contract.findById(checkin.contractId);
+    if (!contract) {
+      return res.status(404).json({ success: false, message: "Contract not found" });
+    }
+
+    // Kiểm tra số lần đã gia hạn: đếm số RECEIPT bills đã PAID (trừ bill đầu tiên)
+    const Bill = (await import("../models/bill.model.js")).default;
+    const allReceiptBills = await Bill.find({
+      contractId: contract._id,
+      billType: "RECEIPT",
+      status: "PAID"
+    }).sort({ createdAt: 1 }); // Sắp xếp theo thời gian tạo
+    
+    // Lấy receiptBillId đầu tiên (bill phiếu thu ban đầu)
+    const firstReceiptBillId = checkin.receiptBillId 
+      ? (typeof checkin.receiptBillId === 'object' ? checkin.receiptBillId._id : checkin.receiptBillId)
+      : null;
+    
+    // Đếm số lần gia hạn: số RECEIPT bills đã PAID trừ bill đầu tiên
+    const extensionCount = allReceiptBills.filter(bill => {
+      const billId = bill._id.toString();
+      return billId !== firstReceiptBillId?.toString();
+    }).length;
+    
+    // Validate: chỉ cho phép gia hạn tối đa 3 lần
+    if (extensionCount >= 3) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Đã gia hạn tối đa 3 lần, không thể gia hạn thêm" 
+      });
+    }
+
+    // Tính toán giá trị mới: chỉ cộng thêm tiền cọc, không thay đổi thời hạn thuê
+    const currentDeposit = Number(checkin.deposit?.toString() || 0);
+    const newDeposit = currentDeposit + depositNum;
+
+    // Cập nhật checkin: chỉ cập nhật deposit
+    // KHÔNG reset receiptPaidAt ở đây - sẽ được set lại khi thanh toán bill RECEIPT mới
+    checkin.deposit = toDec(newDeposit);
+    await checkin.save();
+
+    // Cập nhật contract deposit
+    contract.deposit = toDec(newDeposit);
+    await contract.save();
+
+    // Cập nhật CONTRACT bill nếu đã có (tính lại tiền cọc còn lại)
+    const existingContractBills = await Bill.find({
+      contractId: contract._id,
+      billType: "CONTRACT",
+      status: { $ne: "PAID" } // Chỉ cập nhật bills chưa thanh toán
+    });
+
+    // Cập nhật CONTRACT bill nếu đã có (tính lại tiền cọc còn lại)
+    for (const contractBill of existingContractBills) {
+      // Tính tổng tất cả RECEIPT bills đã thanh toán (PAID)
+      const receiptBills = await Bill.find({
+        contractId: contract._id,
+        billType: "RECEIPT",
+        status: "PAID"
+      });
+      
+      const totalReceiptPaid = receiptBills.reduce((sum, bill) => {
+        return sum + Number(bill.amountPaid?.toString() || 0);
+      }, 0);
+      
+      // Tiền cọc còn lại = 1 tháng tiền phòng - tổng đã thanh toán ở RECEIPT bills
+      // Logic: Tiền cọc 1 tháng tiền phòng = monthlyRent, nếu đã đóng qua RECEIPT thì trừ đi
+      const monthlyRentNum = Number(contract.monthlyRent?.toString() || 0);
+      const depositRemaining = Math.max(0, monthlyRentNum - totalReceiptPaid);
+      
+      // Cập nhật lineItems trong CONTRACT bill
+      if (contractBill.lineItems && contractBill.lineItems.length > 0) {
+        const depositItem = contractBill.lineItems.find((item) => 
+          item.item && item.item.includes("Tiền cọc")
+        );
+        
+        if (depositItem) {
+          depositItem.unitPrice = toDec(depositRemaining);
+          depositItem.lineTotal = toDec(depositRemaining);
+          
+          // Tính lại amountDue = tiền thuê tháng đầu + tiền cọc còn lại
+          const firstMonthRentItem = contractBill.lineItems.find((item) => 
+            item.item && item.item.includes("Tiền thuê tháng đầu")
+          );
+          const firstMonthRent = firstMonthRentItem 
+            ? Number(firstMonthRentItem.lineTotal?.toString() || 0)
+            : monthlyRentNum;
+          
+          contractBill.amountDue = toDec(depositRemaining + firstMonthRent);
+          contractBill.amountPaid = toDec(totalReceiptPaid); // Cập nhật amountPaid = tổng đã thanh toán ở RECEIPT
+          await contractBill.save();
+        }
+      }
+    }
+
+    // Tạo bill RECEIPT mới cho tiền cọc gia hạn
+    const receiptLineItems = [
+      {
+        item: "Gia hạn đặt cọc giữ phòng",
+        quantity: 1,
+        unitPrice: toDec(depositNum),
+        lineTotal: toDec(depositNum),
+      },
+    ];
+
+    const receiptBillPayload = {
+      contractId: contract._id,
+      billingDate: new Date(),
+      billType: "RECEIPT",
+      status: "UNPAID", // Mới tạo là "Chờ thanh toán", chỉ chuyển sang PENDING_CASH_CONFIRM khi khách yêu cầu thanh toán tiền mặt
+      lineItems: receiptLineItems,
+      amountDue: toDec(depositNum),
+      amountPaid: toDec(0),
+      payments: [],
+      note: `Gia hạn thời hạn cọc giữ phòng, tiền cọc thêm: ${depositNum.toLocaleString("vi-VN")} VNĐ`,
+    };
+
+    if (checkin.tenantId) {
+      receiptBillPayload.tenantId = checkin.tenantId;
+    }
+
+    const newReceiptBill = await Bill.create(receiptBillPayload);
+
+    // Cập nhật checkin với receiptBillId mới
+    checkin.receiptBillId = newReceiptBill._id;
+    await checkin.save();
+
+    // 📝 Log extend receipt
+    const logService = (await import("../services/log.service.js")).default;
+    await logService.logUpdate({
+      entity: 'CHECKIN',
+      entityId: checkin._id,
+      actorId: user._id,
+      data: {
+        action: 'EXTEND_RECEIPT',
+        additionalDeposit: depositNum,
+        newDeposit,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Gia hạn thành công! Tiền cọc thêm: ${depositNum.toLocaleString("vi-VN")} VNĐ. Thời hạn cọc giữ phòng được reset lại 3 ngày.`,
+      data: {
+        checkinId: checkin._id,
+        receiptBillId: newReceiptBill._id,
+        newDeposit,
+      },
+    });
+  } catch (err) {
+    console.error("extendReceipt error:", err);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Server error", 
+      error: err.message 
+    });
+  }
+};
+
+export default { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSampleDocx, cancelCheckin, getAllCheckins, completeCheckin, extendReceipt };

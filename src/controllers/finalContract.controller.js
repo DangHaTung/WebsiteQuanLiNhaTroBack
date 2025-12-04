@@ -803,6 +803,7 @@ export const cancelFinalContract = async (req, res) => {
     }
 
     fc.status = "CANCELED";
+    fc.canceledAt = new Date(); // Lưu ngày hủy
     await fc.save();
 
     // Lấy roomId để xử lý
@@ -824,6 +825,7 @@ export const cancelFinalContract = async (req, res) => {
         const originContract = await Contract.findById(originContractId);
         if (originContract && originContract.status === "ACTIVE") {
           originContract.status = "CANCELED";
+          originContract.canceledAt = new Date(); // Lưu ngày hủy
           await originContract.save();
           console.log(`✅ Canceled origin Contract ${originContractId} when canceling FinalContract ${fc._id}`);
         }
@@ -837,6 +839,19 @@ export const cancelFinalContract = async (req, res) => {
 
       for (const contract of allActiveContracts) {
         contract.status = "CANCELED";
+        contract.canceledAt = new Date(); // Lưu ngày hủy
+        
+        // Đánh dấu tất cả co-tenants là hết hiệu lực (status = EXPIRED)
+        if (contract.coTenants && contract.coTenants.length > 0) {
+          contract.coTenants = contract.coTenants.map(ct => {
+            if (ct.status === "ACTIVE") {
+              ct.status = "EXPIRED";
+            }
+            return ct;
+          });
+          console.log(`✅ Marked ${contract.coTenants.filter(ct => ct.status === "EXPIRED").length} co-tenant(s) as EXPIRED when canceling Contract ${contract._id}`);
+        }
+        
         await contract.save();
         console.log(`✅ Canceled Contract ${contract._id} in room ${roomId} when canceling FinalContract ${fc._id}`);
 

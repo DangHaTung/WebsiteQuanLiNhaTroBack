@@ -560,19 +560,47 @@ export const confirmCashReceipt = async (req, res) => {
       );
     }
 
-    // Tự động complete checkin và cập nhật room status nếu là bill RECEIPT đã PAID
+    // Tự động cập nhật checkin và room status nếu là bill RECEIPT đã PAID
     if (bill.billType === "RECEIPT" && bill.status === "PAID") {
       const Checkin = (await import("../models/checkin.model.js")).default;
       const Room = (await import("../models/room.model.js")).default;
       const checkin = await Checkin.findOne({
         receiptBillId: bill._id,
       }).populate("roomId");
-      if (checkin && checkin.status === "CREATED") {
-        checkin.status = "COMPLETED";
-        checkin.receiptPaidAt = new Date(); // Lưu thời điểm thanh toán phiếu thu
+      if (checkin) {
+        // Cập nhật receiptPaidAt khi thanh toán bill RECEIPT
+        // Nếu đã có receiptPaidAt (gia hạn): cộng thêm 3 ngày vào thời hạn hiện tại
+        // Nếu chưa có (lần đầu): set = now (bắt đầu 3 ngày)
+        const now = new Date();
+        if (checkin.receiptPaidAt) {
+          // Đã có receiptPaidAt cũ → gia hạn
+          const oldExpirationDate = new Date(checkin.receiptPaidAt);
+          oldExpirationDate.setDate(oldExpirationDate.getDate() + 3); // Thời hạn cũ (receiptPaidAt + 3 ngày)
+          
+          // Nếu thời hạn cũ đã hết, bắt đầu lại từ now
+          // Nếu thời hạn cũ còn, cộng thêm 3 ngày vào thời hạn cũ
+          const baseDate = oldExpirationDate > now ? oldExpirationDate : now;
+          const newExpirationDate = new Date(baseDate);
+          newExpirationDate.setDate(newExpirationDate.getDate() + 3); // Cộng thêm 3 ngày
+          
+          // Tính ngược lại receiptPaidAt mới (để expirationDate = receiptPaidAt + 3 ngày)
+          checkin.receiptPaidAt = new Date(newExpirationDate);
+          checkin.receiptPaidAt.setDate(checkin.receiptPaidAt.getDate() - 3);
+        } else {
+          // Lần đầu thanh toán → bắt đầu 3 ngày từ now
+          checkin.receiptPaidAt = now;
+        }
+        
+        // Chỉ set status = COMPLETED nếu đang là CREATED (tránh override status khác)
+        if (checkin.status === "CREATED") {
+          checkin.status = "COMPLETED";
+        }
+        
         await checkin.save();
+        const expirationDate = new Date(checkin.receiptPaidAt);
+        expirationDate.setDate(expirationDate.getDate() + 3);
         console.log(
-          `✅ [CASH CONFIRM] Auto-completed checkin ${checkin._id} after cash payment confirmation, receiptPaidAt: ${checkin.receiptPaidAt}`
+          `✅ [CASH CONFIRM] Updated checkin ${checkin._id} after cash payment confirmation, receiptPaidAt: ${checkin.receiptPaidAt}, expirationDate: ${expirationDate}, status: ${checkin.status}`
         );
 
         // Cập nhật room status = DEPOSITED, occupantCount = 0
