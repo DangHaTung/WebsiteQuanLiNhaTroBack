@@ -44,6 +44,9 @@ const contractSchema = new Schema(
       enum: ["ACTIVE", "ENDED", "CANCELED"],
       default: "ACTIVE",
     },
+    canceledAt: {
+      type: Date,
+    }, // Ngày hủy hợp đồng (nếu hủy trước hạn)
     pricingSnapshot: {
       roomNumber: { type: String },
       monthlyRent: { type: mongoose.Schema.Types.Decimal128 },
@@ -70,7 +73,12 @@ const contractSchema = new Schema(
         email: { type: String },
         identityNo: { type: String },
         joinedAt: { type: Date, default: Date.now },
-        leftAt: { type: Date }, // Nếu rời phòng giữa chừng
+        leftAt: { type: Date }, // Nếu rời phòng giữa chừng (giữ lại để tương thích)
+        status: {
+          type: String,
+          enum: ["ACTIVE", "EXPIRED"],
+          default: "ACTIVE",
+        }, // Trạng thái: ACTIVE = đang hoạt động, EXPIRED = hết hiệu lực (khi hợp đồng hủy/hết hạn)
         finalContractId: { type: Schema.Types.ObjectId, ref: "FinalContract" },
       },
     ],

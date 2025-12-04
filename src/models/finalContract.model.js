@@ -40,6 +40,9 @@ const finalContractSchema = new Schema(
       enum: ["DRAFT", "WAITING_SIGN", "SIGNED", "CANCELED"],
       default: "DRAFT",
     },
+    canceledAt: {
+      type: Date,
+    }, // Ngày hủy hợp đồng (nếu hủy trước hạn)
 
     // Uploads
     images: [fileSchema],

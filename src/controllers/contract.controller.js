@@ -85,27 +85,71 @@ export const getAllContracts = async (req, res) => {
 
     const filter = {};
     if (status) {
+      // Nếu client yêu cầu cụ thể status, dùng status đó
       filter.status = status;
     }
+    // Nếu không có status filter, lấy tất cả (ACTIVE, ENDED, CANCELED) - để frontend có thể hiển thị tất cả
 
     const contracts = await Contract.find(filter)
       .populate("tenantId", "fullName email phone")
-      .populate("roomId", "roomNumber pricePerMonth")
+      .populate("roomId", "roomNumber pricePerMonth status")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip);
 
+    // Filter thêm: loại bỏ contracts có room status = AVAILABLE (để đảm bảo tính nhất quán)
+    // Vì nếu room đã về AVAILABLE thì contract không nên còn ACTIVE
+    const Room = (await import("../models/room.model.js")).default;
+    const filteredContracts = [];
+    
+    for (const contract of contracts) {
+      // Chỉ filter: Nếu contract có status = ACTIVE nhưng room đã về AVAILABLE, bỏ qua (không nhất quán)
+      // Các contract CANCELED hoặc ENDED vẫn hiển thị để user biết lịch sử
+      if (contract.status === "ACTIVE" && contract.roomId) {
+        const roomId = typeof contract.roomId === 'object' ? contract.roomId._id : contract.roomId;
+        if (roomId) {
+          const room = await Room.findById(roomId).select("status");
+          if (room && room.status === "AVAILABLE") {
+            console.log(`⚠️ Skipping contract ${contract._id} - room ${roomId} is AVAILABLE but contract is ACTIVE`);
+            continue; // Bỏ qua contract này (không nhất quán)
+          }
+        }
+      }
+      // Các contract CANCELED, ENDED, hoặc ACTIVE hợp lệ đều được thêm vào
+      filteredContracts.push(contract);
+    }
+
     const total = await Contract.countDocuments(filter);
 
     // Format contracts để chuyển đổi Decimal128 sang number
-    const formattedContracts = contracts.map(formatContract);
+    const formattedContracts = filteredContracts.map(formatContract);
     
     // Deduplicate by _id để tránh trả về duplicate
     const uniqueContracts = Array.from(
       new Map(formattedContracts.map(c => [c._id.toString(), c])).values()
     );
     
-    console.log(`📊 getAllContracts: Found ${contracts.length} contracts, after dedup: ${uniqueContracts.length}`);
+    // Sắp xếp: ACTIVE lên đầu, sau đó ENDED, cuối cùng CANCELED
+    // Thứ tự ưu tiên: ACTIVE = 0, ENDED = 1, CANCELED = 2
+    const statusOrder = {
+      ACTIVE: 0,
+      ENDED: 1,
+      CANCELED: 2,
+    };
+    
+    uniqueContracts.sort((a, b) => {
+      const orderA = statusOrder[a.status] ?? 999;
+      const orderB = statusOrder[b.status] ?? 999;
+      if (orderA !== orderB) {
+        return orderA - orderB; // Sắp xếp theo status
+      }
+      // Nếu cùng status, sắp xếp theo createdAt mới nhất trước
+      const dateA = new Date(a.createdAt || 0).getTime();
+      const dateB = new Date(b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
+    
+    console.log(`📊 getAllContracts: Found ${contracts.length} contracts, filtered: ${filteredContracts.length}, after dedup: ${uniqueContracts.length}`);
 
     res.status(200).json({
       success: true,
@@ -353,7 +397,7 @@ export const refundDeposit = async (req, res) => {
     // Tính số người ở (nếu không được truyền)
     const finalOccupantCount = occupantCount !== undefined 
       ? occupantCount 
-      : 1 + (contract.coTenants?.filter(ct => !ct.leftAt).length || 0);
+      : 1 + (contract.coTenants?.filter(ct => ct.status === "ACTIVE").length || 0);
 
     // Tính tổng tiền cọc theo nghiệp vụ:
     // Tiền cọc = 1 tháng tiền phòng (monthlyRent)
@@ -398,6 +442,18 @@ export const refundDeposit = async (req, res) => {
 
     // Cập nhật contract (giữ lại co-tenants, không xóa)
     contract.status = "ENDED"; // Set sang ENDED khi hoàn cọc
+    
+    // Đánh dấu tất cả co-tenants là hết hiệu lực (status = EXPIRED) khi hợp đồng kết thúc
+    if (contract.coTenants && contract.coTenants.length > 0) {
+      contract.coTenants = contract.coTenants.map(ct => {
+        if (ct.status === "ACTIVE") {
+          ct.status = "EXPIRED";
+        }
+        return ct;
+      });
+      console.log(`[refundDeposit] Marked ${contract.coTenants.filter(ct => ct.status === "EXPIRED").length} co-tenant(s) as EXPIRED when contract ended`);
+    }
+    
     contract.depositRefunded = true;
     contract.depositRefund = {
       amount: mongoose.Types.Decimal128.fromString(refundAmount.toFixed(2)),
@@ -442,7 +498,7 @@ export const refundDeposit = async (req, res) => {
     }
     
     // 2. Xử lý co-tenants: Tạo FinalContract mới cho co-tenant (nếu chưa có)
-    const activeCoTenants = contract.coTenants?.filter(ct => !ct.leftAt && ct.userId) || [];
+    const activeCoTenants = contract.coTenants?.filter(ct => ct.status === "ACTIVE" && ct.userId) || [];
     
     if (activeCoTenants.length > 0) {
       console.log(`[refundDeposit] Found ${activeCoTenants.length} active co-tenant(s), processing...`);
@@ -583,6 +639,7 @@ export const linkCoTenantToContract = async (req, res) => {
       email: user.email,
       identityNo: user.identityNo,
       joinedAt: new Date(),
+      status: "ACTIVE", // Mặc định là ACTIVE khi thêm mới
       finalContractId: finalContractId,
     });
 
@@ -640,7 +697,7 @@ export const addCoTenant = async (req, res) => {
     }
 
     // Phòng đôi (DOUBLE) chỉ được thêm 1 người ở cùng
-    const currentCoTenantsCount = contract.coTenants?.filter(ct => !ct.leftAt).length || 0;
+    const currentCoTenantsCount = contract.coTenants?.filter(ct => ct.status === "ACTIVE").length || 0;
     if (room.type === "DOUBLE" && currentCoTenantsCount >= 1) {
       return res.status(400).json({
         success: false,
@@ -649,7 +706,7 @@ export const addCoTenant = async (req, res) => {
     }
 
     // Kiểm tra đã tồn tại chưa (theo phone)
-    const exists = contract.coTenants?.find((ct) => ct.phone === phone && !ct.leftAt);
+    const exists = contract.coTenants?.find((ct) => ct.phone === phone && ct.status === "ACTIVE");
     if (exists) {
       return res.status(400).json({
         success: false,
@@ -694,13 +751,14 @@ export const addCoTenant = async (req, res) => {
       email,
       identityNo,
       joinedAt: new Date(),
+      status: "ACTIVE", // Mặc định là ACTIVE khi thêm mới
     });
 
     await contract.save();
 
     // Cập nhật occupantCount của phòng
     const Room = (await import("../models/room.model.js")).default;
-    const activeCoTenantsCount = contract.coTenants?.filter(ct => !ct.leftAt).length || 0;
+    const activeCoTenantsCount = contract.coTenants?.filter(ct => ct.status === "ACTIVE").length || 0;
     // occupantCount = 1 (người thuê chính) + số người ở cùng
     const newOccupantCount = 1 + activeCoTenantsCount;
     

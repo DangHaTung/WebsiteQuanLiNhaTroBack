@@ -112,7 +112,7 @@ export const getAllRooms = async (req, res) => {
                 // Tính occupantCount: 1 người thuê chính + số người ở cùng (co-tenants)
                 let totalOccupants = signedContractsCount;
                 if (activeContract && activeContract.coTenants) {
-                    const activeCoTenants = activeContract.coTenants.filter(ct => !ct.leftAt);
+                    const activeCoTenants = activeContract.coTenants.filter(ct => ct.status === "ACTIVE");
                     totalOccupants = signedContractsCount + activeCoTenants.length;
                 }
                 formatted.occupantCount = totalOccupants;
@@ -126,7 +126,7 @@ export const getAllRooms = async (req, res) => {
                 // Tính occupantCount từ co-tenants nếu có
                 let totalOccupants = 0;
                 if (activeContract.coTenants) {
-                    const activeCoTenants = activeContract.coTenants.filter(ct => !ct.leftAt);
+                    const activeCoTenants = activeContract.coTenants.filter(ct => ct.status === "ACTIVE");
                     totalOccupants = 1 + activeCoTenants.length; // 1 người thuê chính + co-tenants
                 } else {
                     totalOccupants = 1; // Chỉ có người thuê chính
