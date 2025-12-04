@@ -87,6 +87,9 @@ const billSchema = new Schema(
     paymentToken: { type: String, index: true },
     paymentTokenExpiresAt: { type: Date },
 
+    // Metadata để lưu thông tin bổ sung (ví dụ: ảnh bill chuyển khoản)
+    metadata: { type: Schema.Types.Mixed },
+
    createdAt: { type: Date, default: Date.now },
    updatedAt: { type: Date, default: Date.now },
   },

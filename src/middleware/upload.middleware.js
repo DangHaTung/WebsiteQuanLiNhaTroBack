@@ -123,4 +123,30 @@ export const uploadRefundQrCode = multer({
   },
 }).single("refundQrCode");
 
+// ===== Receipt Image Upload =====
+const receiptStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => {
+    return {
+      folder: "receipts",
+      resource_type: "image",
+      format: undefined,
+      public_id: undefined,
+      transformation: [{ quality: "auto:good" }],
+    };
+  },
+});
+
+export const uploadReceiptImage = multer({
+  storage: receiptStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowedMimes.includes(file.mimetype)) {
+      return cb(new Error("Chỉ chấp nhận file ảnh (JPEG, PNG, WebP)"));
+    }
+    cb(null, true);
+  },
+}).single("receiptImage");
+
 
