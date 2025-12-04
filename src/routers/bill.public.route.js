@@ -4,6 +4,7 @@ import { validatePagination, validateParams } from "../middleware/validation.mid
 import { billParamsSchema } from "../validations/bill.validation.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
 import { authenticateToken } from "../middleware/auth.middleware.js";
+import { uploadReceiptImage } from "../middleware/upload.middleware.js";
 
 const router = express.Router();
 
@@ -20,7 +21,7 @@ router.get("/bills/pending-payment", authenticateToken, asyncHandler(getMyPendin
 router.get("/bills/final-contract/:finalContractId", authenticateToken, asyncHandler(getBillsByFinalContractId));
 
 // Route: Tenant request thanh toán tiền mặt
-router.post("/bills/:id/pay-cash", authenticateToken, validateParams(billParamsSchema), asyncHandler(requestCashPayment));
+router.post("/bills/:id/pay-cash", authenticateToken, validateParams(billParamsSchema), uploadReceiptImage, asyncHandler(requestCashPayment));
 
 export default router;
 
