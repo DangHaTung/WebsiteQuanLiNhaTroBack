@@ -18,7 +18,7 @@ import { asyncHandler } from "../middleware/error.middleware.js";
 
 const router = express.Router();
 
-// ===== PROTECTED ROUTES - CẦN ADMIN/STAFF =====
+// ===== PROTECTED ROUTES - CẦN ADMIN =====
 // Public routes đã được tách ra file riêng: bill.public.route.js
 router.get("/bills", authenticateToken, authorize('ADMIN'), validatePagination(), asyncHandler(getAllBills));
 router.get("/bills/drafts", authenticateToken, authorize('ADMIN'), validatePagination(), asyncHandler(async (req, res) => {
