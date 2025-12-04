@@ -815,15 +815,38 @@ export const publishDraftBill = async (req, res) => {
       electricityKwh,
       waterM3 = 0,
       occupantCount = 1,
-      vehicleCount = 0,
+      vehicleCount = 0, // Deprecated: dùng vehicles thay thế
+      vehicles = [], // Danh sách xe chi tiết [{type, licensePlate}]
     } = req.body;
 
+    // Tính tổng số xe từ vehicles array hoặc vehicleCount
+    const totalVehicles = vehicles.length > 0 ? vehicles.length : vehicleCount;
+
     // Validate: số xe không được vượt quá số người
-    if (vehicleCount > occupantCount) {
+    if (totalVehicles > occupantCount) {
       return res.status(400).json({
         success: false,
-        message: `Số xe (${vehicleCount}) không được vượt quá số người ở (${occupantCount})`,
+        message: `Số xe (${totalVehicles}) không được vượt quá số người ở (${occupantCount})`,
       });
+    }
+
+    // Validate vehicles array
+    if (vehicles.length > 0) {
+      for (const vehicle of vehicles) {
+        if (!['motorbike', 'electric_bike', 'bicycle'].includes(vehicle.type)) {
+          return res.status(400).json({
+            success: false,
+            message: `Loại xe không hợp lệ: ${vehicle.type}. Chỉ chấp nhận: motorbike, electric_bike, bicycle`,
+          });
+        }
+        // Xe máy và xe điện phải có biển số
+        if (['motorbike', 'electric_bike'].includes(vehicle.type) && !vehicle.licensePlate) {
+          return res.status(400).json({
+            success: false,
+            message: `Xe ${vehicle.type === 'motorbike' ? 'máy' : 'điện'} phải có biển số`,
+          });
+        }
+      }
     }
 
     const bill = await Bill.findById(id).populate("contractId");
@@ -867,7 +890,8 @@ export const publishDraftBill = async (req, res) => {
       electricityKwh: Number(electricityKwh),
       waterM3: Number(waterM3),
       occupantCount: Number(occupantCount),
-      vehicleCount: Number(vehicleCount),
+      vehicleCount: vehicles.length > 0 ? 0 : Number(vehicleCount), // Nếu có vehicles thì không dùng vehicleCount
+      vehicles: vehicles, // Truyền vehicles array
     });
 
     // Cập nhật bill
@@ -876,6 +900,7 @@ export const publishDraftBill = async (req, res) => {
     bill.amountDue = mongoose.Types.Decimal128.fromString(
       String(feeCalculation.totalAmount)
     );
+    bill.vehicles = vehicles; // Lưu thông tin xe vào bill
     bill.updatedAt = new Date();
 
     await bill.save();
@@ -905,7 +930,7 @@ export const publishDraftBill = async (req, res) => {
  */
 export const publishBatchDraftBills = async (req, res) => {
   try {
-    const { bills } = req.body; // Array of { billId, electricityKwh, occupantCount }
+    const { bills } = req.body; // Array of { billId, electricityKwh, occupantCount, vehicles }
 
     if (!Array.isArray(bills) || bills.length === 0) {
       return res
@@ -925,16 +950,39 @@ export const publishBatchDraftBills = async (req, res) => {
           electricityKwh,
           waterM3 = 0,
           occupantCount = 1,
-          vehicleCount = 0,
+          vehicleCount = 0, // Deprecated
+          vehicles = [], // Danh sách xe chi tiết
         } = item;
 
+        // Tính tổng số xe
+        const totalVehicles = vehicles.length > 0 ? vehicles.length : vehicleCount;
+
         // Validate: số xe không được vượt quá số người
-        if (vehicleCount > occupantCount) {
+        if (totalVehicles > occupantCount) {
           results.failed.push({
             billId,
-            error: `Số xe (${vehicleCount}) không được vượt quá số người ở (${occupantCount})`,
+            error: `Số xe (${totalVehicles}) không được vượt quá số người ở (${occupantCount})`,
           });
           continue;
+        }
+
+        // Validate vehicles array
+        if (vehicles.length > 0) {
+          let vehicleError = null;
+          for (const vehicle of vehicles) {
+            if (!['motorbike', 'electric_bike', 'bicycle'].includes(vehicle.type)) {
+              vehicleError = `Loại xe không hợp lệ: ${vehicle.type}`;
+              break;
+            }
+            if (['motorbike', 'electric_bike'].includes(vehicle.type) && !vehicle.licensePlate) {
+              vehicleError = `Xe ${vehicle.type === 'motorbike' ? 'máy' : 'điện'} phải có biển số`;
+              break;
+            }
+          }
+          if (vehicleError) {
+            results.failed.push({ billId, error: vehicleError });
+            continue;
+          }
         }
 
         const bill = await Bill.findById(billId).populate("contractId");
@@ -966,7 +1014,8 @@ export const publishBatchDraftBills = async (req, res) => {
           electricityKwh: Number(electricityKwh),
           waterM3: Number(waterM3),
           occupantCount: Number(occupantCount),
-          vehicleCount: Number(vehicleCount),
+          vehicleCount: vehicles.length > 0 ? 0 : Number(vehicleCount),
+          vehicles: vehicles,
         });
 
         // Cập nhật
@@ -975,6 +1024,7 @@ export const publishBatchDraftBills = async (req, res) => {
         bill.amountDue = mongoose.Types.Decimal128.fromString(
           String(feeCalculation.totalAmount)
         );
+        bill.vehicles = vehicles; // Lưu thông tin xe
         bill.updatedAt = new Date();
         await bill.save();
 

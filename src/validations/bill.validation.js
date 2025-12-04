@@ -302,3 +302,36 @@ export const billParamsSchema = Joi.object({
 
 // Schema cho params với billId (dùng cho generate-payment-link) - giống billParamsSchema
 export const billIdParamsSchema = billParamsSchema;
+
+// Schema cho thông tin xe
+const vehicleSchema = Joi.object({
+  type: Joi.string().valid('motorbike', 'electric_bike', 'bicycle').required(),
+  licensePlate: Joi.string().allow('', null).optional(),
+});
+
+// Schema cho publish draft bill
+export const publishDraftBillSchema = Joi.object({
+  electricityKwh: Joi.number().min(0).required().messages({
+    'number.base': 'Số điện phải là số',
+    'number.min': 'Số điện không được âm',
+    'any.required': 'Số điện là bắt buộc',
+  }),
+  waterM3: Joi.number().min(0).default(0),
+  occupantCount: Joi.number().integer().min(1).default(1),
+  vehicleCount: Joi.number().integer().min(0).default(0), // Deprecated
+  vehicles: Joi.array().items(vehicleSchema).default([]), // Danh sách xe chi tiết
+});
+
+// Schema cho publish batch
+export const publishBatchBillsSchema = Joi.object({
+  bills: Joi.array().items(
+    Joi.object({
+      billId: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required(),
+      electricityKwh: Joi.number().min(0).required(),
+      waterM3: Joi.number().min(0).default(0),
+      occupantCount: Joi.number().integer().min(1).default(1),
+      vehicleCount: Joi.number().integer().min(0).default(0), // Deprecated
+      vehicles: Joi.array().items(vehicleSchema).default([]), // Danh sách xe chi tiết
+    })
+  ).min(1).required(),
+});

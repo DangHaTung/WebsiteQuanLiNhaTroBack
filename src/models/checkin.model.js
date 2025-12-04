@@ -74,6 +74,16 @@ const checkinSchema = new Schema(
 
     // Số điện chốt ban đầu khi check-in (để tính số điện tiêu thụ cho hóa đơn hàng tháng)
     initialElectricReading: { type: Number },
+
+    // Danh sách xe của khách thuê (lưu 1 lần khi check-in, tự động áp dụng cho hóa đơn hàng tháng)
+    vehicles: [{
+      type: { 
+        type: String, 
+        enum: ['motorbike', 'electric_bike', 'bicycle'], 
+        required: true 
+      },
+      licensePlate: { type: String }, // Biển số xe (optional cho xe đạp)
+    }],
   },
   { timestamps: { createdAt: true, updatedAt: false }, versionKey: false }
 );

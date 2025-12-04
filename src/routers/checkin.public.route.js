@@ -2,7 +2,7 @@ import express from "express";
 import { authenticateToken, authorize } from "../middleware/auth.middleware.js";
 import { asyncHandler } from "../middleware/error.middleware.js";
 import { uploadCccdImages } from "../middleware/upload.middleware.js";
-import { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSampleDocx, cancelCheckin, getAllCheckins, completeCheckin, extendReceipt } from "../controllers/checkin.controller.js";
+import { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSampleDocx, cancelCheckin, getAllCheckins, completeCheckin, extendReceipt, updateVehicles, getCheckinById } from "../controllers/checkin.controller.js";
 
 const router = express.Router();
 
@@ -28,5 +28,11 @@ router.post("/checkins/:id/cancel", authenticateToken, authorize('ADMIN'), async
 
 // Gia hạn phiếu thu - thêm tiền cọc và thời hạn
 router.post("/checkins/:id/extend", authenticateToken, authorize('ADMIN'), asyncHandler(extendReceipt));
+
+// Lấy thông tin checkin theo ID
+router.get("/checkins/:id", authenticateToken, authorize('ADMIN'), asyncHandler(getCheckinById));
+
+// Cập nhật danh sách xe cho checkin
+router.put("/checkins/:id/vehicles", authenticateToken, authorize('ADMIN'), asyncHandler(updateVehicles));
 
 export default router;

@@ -17,6 +17,8 @@ const toNum = (d) => (d === null || d === undefined ? 0 : parseFloat(d.toString(
  * @param {number} params.electricityKwh - Số điện tiêu thụ (kWh)
  * @param {number} params.waterM3 - Số nước tiêu thụ (m3) - KHÔNG SỬ DỤNG, tiền nước tính theo số người
  * @param {number} params.occupantCount - Số người ở
+ * @param {number} params.vehicleCount - Số lượng xe (deprecated, dùng vehicles thay thế)
+ * @param {Array} params.vehicles - Danh sách xe chi tiết [{type: 'motorbike'|'electric_bike'|'bicycle', licensePlate?: string}]
  * @returns {Promise<{lineItems: Array, totalAmount: number, breakdown: Object}>}
  */
 export async function calculateRoomMonthlyFees({
@@ -24,7 +26,8 @@ export async function calculateRoomMonthlyFees({
   electricityKwh = 0,
   waterM3 = 0, // Tham số này không được sử dụng, giữ lại để tương thích API
   occupantCount = 1,
-  vehicleCount = 0, // Số lượng xe (cho phí đỗ xe)
+  vehicleCount = 0, // Deprecated: dùng vehicles thay thế
+  vehicles = [], // Danh sách xe chi tiết
   excludeRent = false, // Tham số mới: bỏ tiền thuê phòng
 }) {
   // Lấy thông tin phòng
@@ -166,27 +169,124 @@ export async function calculateRoomMonthlyFees({
     }
   }
 
-  // 6. Phí đỗ xe (theo số xe, không phải số người)
-  if (roomFee.appliedTypes.includes("parking") && vehicleCount > 0) {
+  // 6. Phí đỗ xe (theo loại xe)
+  // Hỗ trợ cả vehicles array (mới) và vehicleCount (cũ - backward compatible)
+  const hasVehicles = vehicles && vehicles.length > 0;
+  const hasVehicleCount = !hasVehicles && vehicleCount > 0;
+  
+  if (roomFee.appliedTypes.includes("parking") && (hasVehicles || hasVehicleCount)) {
     const activeParking = await UtilityFee.findOne({ type: "parking", isActive: true });
     const parkingRate = activeParking?.baseRate || 0;
     
     if (parkingRate > 0) {
-      const parkingAmount = parkingRate * vehicleCount;
-      
-      lineItems.push({
-        item: `Phí đỗ xe (${vehicleCount} xe)`,
-        quantity: vehicleCount,
-        unitPrice: toDec(parkingRate),
-        lineTotal: toDec(parkingAmount),
-      });
-      
-      breakdown.parking = {
-        vehicleCount: vehicleCount,
-        rate: parkingRate,
-        total: parkingAmount,
-      };
-      totalAmount += parkingAmount;
+      if (hasVehicles) {
+        // Logic mới: tính theo từng xe với loại xe
+        // Xe điện = gấp đôi giá xe máy/xe đạp
+        let parkingTotal = 0;
+        const vehicleDetails = [];
+        
+        // Đếm số lượng từng loại xe
+        const motorbikeCount = vehicles.filter(v => v.type === 'motorbike').length;
+        const electricBikeCount = vehicles.filter(v => v.type === 'electric_bike').length;
+        const bicycleCount = vehicles.filter(v => v.type === 'bicycle').length;
+        
+        // Tính phí xe máy
+        if (motorbikeCount > 0) {
+          const motorbikeAmount = parkingRate * motorbikeCount;
+          const motorbikePlates = vehicles
+            .filter(v => v.type === 'motorbike' && v.licensePlate)
+            .map(v => v.licensePlate)
+            .join(', ');
+          
+          lineItems.push({
+            item: `🏍️ Phí xe máy${motorbikePlates ? ` (${motorbikePlates})` : ` (${motorbikeCount} xe)`}`,
+            quantity: motorbikeCount,
+            unitPrice: toDec(parkingRate),
+            lineTotal: toDec(motorbikeAmount),
+          });
+          
+          parkingTotal += motorbikeAmount;
+          vehicleDetails.push({
+            type: 'motorbike',
+            count: motorbikeCount,
+            rate: parkingRate,
+            total: motorbikeAmount,
+            plates: vehicles.filter(v => v.type === 'motorbike').map(v => v.licensePlate).filter(Boolean),
+          });
+        }
+        
+        // Tính phí xe điện (gấp đôi)
+        if (electricBikeCount > 0) {
+          const electricRate = parkingRate * 2; // Gấp đôi
+          const electricAmount = electricRate * electricBikeCount;
+          const electricPlates = vehicles
+            .filter(v => v.type === 'electric_bike' && v.licensePlate)
+            .map(v => v.licensePlate)
+            .join(', ');
+          
+          lineItems.push({
+            item: `⚡ Phí xe điện${electricPlates ? ` (${electricPlates})` : ` (${electricBikeCount} xe)`}`,
+            quantity: electricBikeCount,
+            unitPrice: toDec(electricRate),
+            lineTotal: toDec(electricAmount),
+          });
+          
+          parkingTotal += electricAmount;
+          vehicleDetails.push({
+            type: 'electric_bike',
+            count: electricBikeCount,
+            rate: electricRate,
+            total: electricAmount,
+            plates: vehicles.filter(v => v.type === 'electric_bike').map(v => v.licensePlate).filter(Boolean),
+          });
+        }
+        
+        // Tính phí xe đạp
+        if (bicycleCount > 0) {
+          const bicycleAmount = parkingRate * bicycleCount;
+          
+          lineItems.push({
+            item: `🚲 Phí xe đạp (${bicycleCount} xe)`,
+            quantity: bicycleCount,
+            unitPrice: toDec(parkingRate),
+            lineTotal: toDec(bicycleAmount),
+          });
+          
+          parkingTotal += bicycleAmount;
+          vehicleDetails.push({
+            type: 'bicycle',
+            count: bicycleCount,
+            rate: parkingRate,
+            total: bicycleAmount,
+          });
+        }
+        
+        breakdown.parking = {
+          vehicles: vehicleDetails,
+          baseRate: parkingRate,
+          electricRate: parkingRate * 2,
+          total: parkingTotal,
+        };
+        totalAmount += parkingTotal;
+        
+      } else {
+        // Logic cũ (backward compatible): tính theo số lượng xe đơn giản
+        const parkingAmount = parkingRate * vehicleCount;
+        
+        lineItems.push({
+          item: `Phí đỗ xe (${vehicleCount} xe)`,
+          quantity: vehicleCount,
+          unitPrice: toDec(parkingRate),
+          lineTotal: toDec(parkingAmount),
+        });
+        
+        breakdown.parking = {
+          vehicleCount: vehicleCount,
+          rate: parkingRate,
+          total: parkingAmount,
+        };
+        totalAmount += parkingAmount;
+      }
     }
   }
 
