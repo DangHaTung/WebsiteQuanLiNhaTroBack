@@ -375,10 +375,10 @@ export const refundDeposit = async (req, res) => {
       waterM3 = 0,
       occupantCount,
       vehicleCount = 0,
+      vehicles = [], // Danh sách xe chi tiết từ check-in
       damageAmount = 0, 
       damageNote = "",
       method = "BANK", 
-      transactionId, 
       note 
     } = req.body || {};
 
@@ -400,43 +400,156 @@ export const refundDeposit = async (req, res) => {
       : 1 + (contract.coTenants?.filter(ct => ct.status === "ACTIVE").length || 0);
 
     // Tính tổng tiền cọc theo nghiệp vụ:
-    // Tiền cọc = 1 tháng tiền phòng (monthlyRent)
-    // Vì: Khoản 1 (Cọc giữ phòng) + Khoản 2 (Cọc 1 tháng tiền phòng) = 1 tháng tiền phòng
+    // Tiền cọc = Cọc giữ phòng (RECEIPT bill) + Cọc còn lại (CONTRACT bill - phần cọc)
+    // Logic: Lấy từ bills thực tế đã thanh toán
     
     let totalDepositPaid = 0;
+    const Bill = (await import("../models/bill.model.js")).default;
+    const Checkin = (await import("../models/checkin.model.js")).default;
     
-    // Cách đơn giản: Tiền cọc = 1 tháng tiền phòng
-    if (contract.roomId && typeof contract.roomId === 'object') {
-      const monthlyRent = convertDecimal128(contract.roomId.pricePerMonth) || convertDecimal128(contract.monthlyRent) || 0;
-      if (monthlyRent > 0) {
-        totalDepositPaid = monthlyRent;
-        console.log(`[refundDeposit] Using monthlyRent as total deposit: ${totalDepositPaid}`);
+    // 1. Lấy RECEIPT bill (Cọc giữ phòng)
+    const checkin = await Checkin.findOne({ contractId: contract._id });
+    if (checkin && checkin.receiptBillId) {
+      const receiptBill = await Bill.findById(checkin.receiptBillId);
+      if (receiptBill && receiptBill.status === "PAID") {
+        const receiptPaid = convertDecimal128(receiptBill.amountPaid) || 0;
+        totalDepositPaid += receiptPaid;
+        console.log(`[refundDeposit] Found RECEIPT bill: amountPaid=${receiptPaid}`);
       }
     }
     
-    // Fallback: nếu không có monthlyRent, dùng contract.deposit
-    if (totalDepositPaid === 0) {
-      totalDepositPaid = convertDecimal128(contract.monthlyRent) || convertDecimal128(contract.deposit) || 0;
-      console.log(`[refundDeposit] Using contract.monthlyRent/deposit as fallback: ${totalDepositPaid}`);
+    // 2. Lấy CONTRACT bill (Cọc còn lại - phần "Tiền cọc (1 tháng tiền phòng)")
+    // Tìm FinalContract liên quan
+    const FinalContract = (await import("../models/finalContract.model.js")).default;
+    const finalContract = await FinalContract.findOne({
+      originContractId: contract._id,
+      isCoTenant: { $ne: true },
+      status: { $in: ["DRAFT", "WAITING_SIGN", "SIGNED"] }
+    });
+    
+    if (finalContract) {
+      const contractBills = await Bill.find({
+        finalContractId: finalContract._id,
+        billType: "CONTRACT",
+        status: "PAID"
+      });
+      
+      if (contractBills.length > 0) {
+        const contractBill = contractBills[0]; // Lấy bill đầu tiên
+        // Tìm lineItem có chứa "cọc" hoặc "Tiền cọc"
+        if (contractBill.lineItems && Array.isArray(contractBill.lineItems)) {
+          const depositLineItem = contractBill.lineItems.find(item => 
+            item.item && (
+              item.item.toLowerCase().includes('cọc') || 
+              item.item.toLowerCase().includes('deposit')
+            )
+          );
+          
+          if (depositLineItem) {
+            const contractDeposit = convertDecimal128(depositLineItem.lineTotal) || 0;
+            totalDepositPaid += contractDeposit;
+            console.log(`[refundDeposit] Found CONTRACT bill deposit: ${contractDeposit}`);
+          } else {
+            // Fallback: nếu không tìm thấy lineItem cọc, lấy lineItem thứ 2 (thường là cọc)
+            if (contractBill.lineItems.length >= 2) {
+              const contractDeposit = convertDecimal128(contractBill.lineItems[1].lineTotal) || 0;
+              totalDepositPaid += contractDeposit;
+              console.log(`[refundDeposit] Found CONTRACT bill deposit (fallback): ${contractDeposit}`);
+            }
+          }
+        }
+      }
     }
     
-    console.log(`[refundDeposit] Total deposit paid: ${totalDepositPaid}`);
+    // Fallback: nếu không tìm thấy bills, dùng monthlyRent
+    if (totalDepositPaid === 0) {
+      if (contract.roomId && typeof contract.roomId === 'object') {
+        const monthlyRent = convertDecimal128(contract.roomId.pricePerMonth) || convertDecimal128(contract.monthlyRent) || 0;
+        if (monthlyRent > 0) {
+          totalDepositPaid = monthlyRent;
+          console.log(`[refundDeposit] Using monthlyRent as fallback: ${totalDepositPaid}`);
+        }
+      }
+      
+      if (totalDepositPaid === 0) {
+        totalDepositPaid = convertDecimal128(contract.monthlyRent) || convertDecimal128(contract.deposit) || 0;
+        console.log(`[refundDeposit] Using contract.monthlyRent/deposit as final fallback: ${totalDepositPaid}`);
+      }
+    }
+    
+    console.log(`[refundDeposit] Total deposit paid (RECEIPT + CONTRACT): ${totalDepositPaid}`);
 
     // Tính dịch vụ tháng cuối (BỎ tiền thuê phòng)
     console.log('[refundDeposit] Calculating service fees...');
+    console.log('[refundDeposit] vehicles from body:', vehicles, 'type:', typeof vehicles, 'isArray:', Array.isArray(vehicles));
+    
+    // Parse vehicles nếu là string (từ JSON)
+    let parsedVehicles = [];
+    if (vehicles) {
+      if (typeof vehicles === 'string') {
+        try {
+          parsedVehicles = JSON.parse(vehicles);
+        } catch (e) {
+          console.error('[refundDeposit] Error parsing vehicles from string:', e);
+          parsedVehicles = [];
+        }
+      } else if (Array.isArray(vehicles)) {
+        parsedVehicles = vehicles;
+      }
+    }
+    
+    console.log('[refundDeposit] parsedVehicles:', parsedVehicles);
+    
     const { calculateRoomMonthlyFees } = await import("../services/billing/monthlyBill.service.js");
-    const serviceFees = await calculateRoomMonthlyFees({
-      roomId: contract.roomId._id,
+    // Sử dụng vehicles nếu có, nếu không thì dùng vehicleCount (backward compatible)
+    const finalVehicleCount = Array.isArray(parsedVehicles) && parsedVehicles.length > 0 
+      ? parsedVehicles.length 
+      : Number(vehicleCount) || 0;
+    
+    // Validate roomId
+    if (!contract.roomId || !contract.roomId._id) {
+      console.error('[refundDeposit] contract.roomId is missing or invalid:', contract.roomId);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Hợp đồng không có thông tin phòng hợp lệ" 
+      });
+    }
+    
+    const roomId = contract.roomId._id;
+    console.log('[refundDeposit] Calling calculateRoomMonthlyFees with:', {
+      roomId: roomId,
       electricityKwh: Number(electricityKwh),
       waterM3: Number(waterM3),
       occupantCount: finalOccupantCount,
-      vehicleCount: Number(vehicleCount) || 0,
-      excludeRent: true, // BỎ tiền thuê phòng
+      vehicleCount: finalVehicleCount,
+      vehicles: parsedVehicles,
+      excludeRent: true,
     });
-    console.log('[refundDeposit] Service fees calculated:', serviceFees.totalAmount);
+    
+    let serviceFees;
+    try {
+      serviceFees = await calculateRoomMonthlyFees({
+        roomId: roomId,
+        electricityKwh: Number(electricityKwh),
+        waterM3: Number(waterM3),
+        occupantCount: finalOccupantCount,
+        vehicleCount: finalVehicleCount,
+        vehicles: Array.isArray(parsedVehicles) ? parsedVehicles : [], // Gửi vehicles chi tiết
+        excludeRent: true, // BỎ tiền thuê phòng
+      });
+      console.log('[refundDeposit] Service fees calculated:', serviceFees.totalAmount);
+    } catch (error) {
+      console.error('[refundDeposit] Error calculating service fees:', error);
+      throw new Error(`Lỗi khi tính phí dịch vụ: ${error.message}`);
+    }
+
+    // Đảm bảo serviceFees.totalAmount là number
+    const serviceFeesAmount = typeof serviceFees.totalAmount === 'number' 
+      ? serviceFees.totalAmount 
+      : Number(serviceFees.totalAmount) || 0;
 
     const damageAmountNum = Number(damageAmount) || 0;
-    const refundAmount = totalDepositPaid - serviceFees.totalAmount - damageAmountNum;
+    const refundAmount = totalDepositPaid - serviceFeesAmount - damageAmountNum;
     
     console.log('[refundDeposit] Calculation: totalDepositPaid=', totalDepositPaid, 'serviceFees=', serviceFees.totalAmount, 'damage=', damageAmountNum, 'refund=', refundAmount);
 
@@ -459,13 +572,69 @@ export const refundDeposit = async (req, res) => {
       amount: mongoose.Types.Decimal128.fromString(refundAmount.toFixed(2)),
       refundedAt: new Date(),
       method,
-      transactionId,
       note,
       damageAmount: mongoose.Types.Decimal128.fromString(damageAmountNum.toFixed(2)),
       damageNote,
-      finalMonthServiceFee: mongoose.Types.Decimal128.fromString(serviceFees.totalAmount.toFixed(2)),
+      finalMonthServiceFee: mongoose.Types.Decimal128.fromString(serviceFeesAmount.toFixed(2)),
+      initialDeposit: mongoose.Types.Decimal128.fromString(totalDepositPaid.toFixed(2)), // Lưu tiền cọc ban đầu (1 tháng tiền phòng) để hiển thị đúng
     };
     await contract.save();
+    
+    // Gửi thông báo cho client sau khi hoàn cọc thành công
+    try {
+      const { emitToUser } = await import("../services/socket/socket.service.js");
+      if (contract.tenantId) {
+        const tenantId = typeof contract.tenantId === 'object' ? contract.tenantId._id : contract.tenantId;
+        const roomNumber = contract.roomId?.roomNumber || 'N/A';
+        
+        const notification = {
+          type: 'DEPOSIT_REFUNDED',
+          contractId: contract._id,
+          moveOutRequestId: null, // Sẽ được set nếu có MoveOutRequest
+          roomNumber: roomNumber,
+          tenantId: tenantId.toString(),
+          tenantName: contract.tenantId?.fullName || 'Khách hàng',
+          refundAmount: refundAmount,
+          method: method,
+          refundedAt: new Date(),
+          message: `Tiền cọc hoàn lại cho phòng ${roomNumber} đã được xử lý. Số tiền: ${refundAmount.toLocaleString('vi-VN')} VNĐ. Vui lòng xác nhận đã nhận được tiền.`,
+          timestamp: new Date(),
+        };
+        
+        // Tìm MoveOutRequest liên quan để cập nhật status và lấy ID
+        // CHỈ tìm APPROVED (chưa hoàn cọc), không tìm WAITING_CONFIRMATION hoặc COMPLETED
+        const MoveOutRequest = (await import("../models/moveOutRequest.model.js")).default;
+        const moveOutRequest = await MoveOutRequest.findOne({ 
+          contractId: contract._id,
+          status: "APPROVED" // CHỈ tìm APPROVED, không tìm WAITING_CONFIRMATION hoặc COMPLETED
+        });
+        
+        if (moveOutRequest) {
+          // Set status = WAITING_CONFIRMATION (chờ khách xác nhận) thay vì COMPLETED
+          const oldStatus = moveOutRequest.status;
+          moveOutRequest.status = "WAITING_CONFIRMATION";
+          moveOutRequest.refundProcessed = true;
+          moveOutRequest.refundedAt = new Date(); // Lưu thời gian hoàn cọc
+          await moveOutRequest.save();
+          
+          // Verify sau khi save
+          const verifyRequest = await MoveOutRequest.findById(moveOutRequest._id);
+          console.log(`[refundDeposit] Updated MoveOutRequest ${moveOutRequest._id}: ${oldStatus} -> ${verifyRequest.status}`);
+          console.log(`[refundDeposit] refundProcessed: ${verifyRequest.refundProcessed}, refundedAt: ${verifyRequest.refundedAt}`);
+          console.log(`[refundDeposit] refundConfirmed: ${verifyRequest.refundConfirmed}`);
+          
+          notification.moveOutRequestId = moveOutRequest._id.toString();
+        } else {
+          console.log(`[refundDeposit] No APPROVED MoveOutRequest found for contract ${contract._id}`);
+        }
+        
+        emitToUser(tenantId.toString(), 'deposit-refunded', notification);
+        console.log(`📤 [refundDeposit] Đã gửi thông báo hoàn cọc đến tenant ${contract.tenantId?.fullName || tenantId}`);
+      }
+    } catch (notifError) {
+      console.error('[refundDeposit] Lỗi khi gửi thông báo:', notifError);
+      // Không throw error để không block refund flow
+    }
 
     // 1. Cancel FinalContract của người thuê chính (KHÔNG cancel FinalContract của co-tenant)
     // FinalContract đã được import ở trên (dòng 375)
@@ -549,8 +718,7 @@ export const refundDeposit = async (req, res) => {
     }
 
     // 3. Cập nhật Checkin: set depositDisposition = "REFUNDED"
-    const checkin = await Checkin.findOne({ contractId: contract._id });
-
+    // Sử dụng lại biến checkin đã lấy ở trên (dòng 411)
     if (checkin) {
       console.log(`[refundDeposit] Found Checkin ${checkin._id}, setting depositDisposition = REFUNDED...`);
       checkin.depositDisposition = "REFUNDED";
@@ -566,8 +734,8 @@ export const refundDeposit = async (req, res) => {
       data: {
         contract: formatContract(contract),
         calculation: {
-          deposit: depositAmount,
-          serviceFees: serviceFees.totalAmount,
+          deposit: totalDepositPaid,
+          serviceFees: serviceFeesAmount,
           serviceFeesBreakdown: serviceFees.breakdown,
           damageAmount: damageAmountNum,
           refundAmount: refundAmount,
@@ -576,7 +744,13 @@ export const refundDeposit = async (req, res) => {
     });
   } catch (error) {
     console.error("refundDeposit error:", error);
-    return res.status(500).json({ success: false, message: "Lỗi khi hoàn cọc", error: error.message });
+    console.error("refundDeposit error stack:", error.stack);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Lỗi khi hoàn cọc", 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 

@@ -5,6 +5,7 @@ import {
   getAllMoveOutRequests,
   updateMoveOutRequestStatus,
   completeMoveOutRequest,
+  confirmRefund,
 } from "../controllers/moveOutRequest.controller.js";
 import { uploadRefundQrCode } from "../middleware/upload.middleware.js";
 import { authenticateToken, authorize } from "../middleware/auth.middleware.js";
@@ -78,6 +79,12 @@ router.post(
   asyncHandler(createMoveOutRequest)
 );
 router.get("/move-out-requests/my", authenticateToken, asyncHandler(getMyMoveOutRequests));
+router.put(
+  "/move-out-requests/:id/confirm-refund",
+  authenticateToken,
+  validateParams(moveOutRequestParamsSchema),
+  asyncHandler(confirmRefund)
+);
 
 // Admin routes
 router.get("/move-out-requests", authenticateToken, authorize("ADMIN"), asyncHandler(getAllMoveOutRequests));
