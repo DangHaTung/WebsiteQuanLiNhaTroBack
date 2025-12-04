@@ -102,7 +102,8 @@ export const getRoomFees = async (req, res) => {
  *  - req.body:
  *      - kwh: số điện tiêu thụ
  *      - occupantCount: số người ở (tính water, cleaning)
- *      - vehicleCount: số xe (tính parking)
+ *      - vehicleCount: số xe (deprecated, dùng vehicles thay thế)
+ *      - vehicles: mảng xe chi tiết [{type: 'motorbike'|'electric_bike'|'bicycle', licensePlate?: string}]
  * Output:
  *  - object { roomId, breakdown: [...], total }
  *      breakdown: chi tiết từng loại phí (baseRate, subtotal, vat, total, số lượng)
@@ -111,7 +112,7 @@ export const getRoomFees = async (req, res) => {
  *  - Electricity: dùng tiers từ DB nếu có, nếu không dùng DEFAULT_ELECTRICITY_TIERS
  *  - Water/cleaning: nhân với occupantCount
  *  - Internet: flat fee
- *  - Parking: nhân với vehicleCount, luôn hiển thị trong breakdown
+ *  - Parking: tính theo loại xe (xe điện = gấp đôi xe máy/xe đạp)
  *  - Rent: lấy từ room.pricePerMonth
  */
 export const calculateRoomFees = async (req, res) => {
@@ -120,13 +121,11 @@ export const calculateRoomFees = async (req, res) => {
     
     // Debug: Log raw req.body trước khi destructure
     console.log(`[calculateRoomFees] Raw req.body:`, JSON.stringify(req.body));
-    console.log(`[calculateRoomFees] req.body keys:`, Object.keys(req.body || {}));
-    console.log(`[calculateRoomFees] req.body.vehicleCount:`, req.body?.vehicleCount, typeof req.body?.vehicleCount);
     
-    const { kwh = 0, occupantCount = 0, vehicleCount = 0 } = req.body; // water/internet/cleaning are flat
+    const { kwh = 0, occupantCount = 0, vehicleCount = 0, vehicles = [] } = req.body;
     
     // Debug: Log sau khi destructure
-    console.log(`[calculateRoomFees] After destructure: kwh=${kwh}, occupantCount=${occupantCount}, vehicleCount=${vehicleCount}`);
+    console.log(`[calculateRoomFees] After destructure: kwh=${kwh}, occupantCount=${occupantCount}, vehicleCount=${vehicleCount}, vehicles=${JSON.stringify(vehicles)}`);
 
     if (!mongoose.isValidObjectId(roomId)) {
       return res.status(400).json({ success: false, message: "Room ID không hợp lệ" });
@@ -216,27 +215,89 @@ export const calculateRoomFees = async (req, res) => {
       total += amount;
     }
 
-    // Parking per vehicle (dùng vehicleCount thay vì occupantCount)
-    // Debug: Kiểm tra parking
-    console.log(`[calculateRoomFees] Parking check: appliedTypes includes parking=${rf.appliedTypes.includes("parking")}, vehicleCount from req.body=${vehicleCount}, typeof=${typeof vehicleCount}`);
+    // Parking per vehicle - hỗ trợ cả vehicles array (mới) và vehicleCount (cũ)
+    console.log(`[calculateRoomFees] Parking check: appliedTypes includes parking=${rf.appliedTypes.includes("parking")}, vehicles=${JSON.stringify(vehicles)}, vehicleCount=${vehicleCount}`);
     
     if (rf.appliedTypes.includes("parking")) {
       const active = await UtilityFee.findOne({ type: "parking", isActive: true });
       const rate = active?.baseRate || 0;
-      const vehicleCountNum = Number(vehicleCount) || 0;
       
-      console.log(`[calculateRoomFees] Parking: rate=${rate}, vehicleCountNum=${vehicleCountNum}, active=${active ? 'found' : 'not found'}, req.body=`, JSON.stringify(req.body));
+      const hasVehicles = vehicles && Array.isArray(vehicles) && vehicles.length > 0;
+      const hasVehicleCount = !hasVehicles && Number(vehicleCount) > 0;
       
-      // Tính parking - luôn thêm vào breakdown để hiển thị, kể cả khi vehicleCount = 0
-      if (rate > 0) {
-        const amount = rate * vehicleCountNum;
-        breakdown.push({ type: "parking", baseRate: rate, vehicleCount: vehicleCountNum, total: amount });
-        total += amount;
-        console.log(`[calculateRoomFees] Parking added to breakdown: vehicleCount=${vehicleCountNum}, rate=${rate}, amount=${amount}`);
-      } else {
-        // Vẫn thêm vào breakdown với amount = 0 để hiển thị
-        breakdown.push({ type: "parking", baseRate: 0, vehicleCount: vehicleCountNum, total: 0 });
-        console.log(`[calculateRoomFees] Parking rate is 0, but still added to breakdown with vehicleCount=${vehicleCountNum}`);
+      if (rate > 0 && (hasVehicles || hasVehicleCount)) {
+        if (hasVehicles) {
+          // Logic mới: tính theo từng loại xe
+          // Xe điện = gấp đôi giá xe máy/xe đạp
+          let parkingTotal = 0;
+          const vehicleDetails = [];
+          
+          // Đếm số lượng từng loại xe
+          const motorbikeCount = vehicles.filter(v => v.type === 'motorbike').length;
+          const electricBikeCount = vehicles.filter(v => v.type === 'electric_bike').length;
+          const bicycleCount = vehicles.filter(v => v.type === 'bicycle').length;
+          
+          // Tính phí xe máy
+          if (motorbikeCount > 0) {
+            const motorbikeAmount = rate * motorbikeCount;
+            parkingTotal += motorbikeAmount;
+            vehicleDetails.push({
+              type: 'motorbike',
+              count: motorbikeCount,
+              rate: rate,
+              total: motorbikeAmount,
+              plates: vehicles.filter(v => v.type === 'motorbike' && v.licensePlate).map(v => v.licensePlate),
+            });
+          }
+          
+          // Tính phí xe điện (gấp đôi)
+          if (electricBikeCount > 0) {
+            const electricRate = rate * 2;
+            const electricAmount = electricRate * electricBikeCount;
+            parkingTotal += electricAmount;
+            vehicleDetails.push({
+              type: 'electric_bike',
+              count: electricBikeCount,
+              rate: electricRate,
+              total: electricAmount,
+              plates: vehicles.filter(v => v.type === 'electric_bike' && v.licensePlate).map(v => v.licensePlate),
+            });
+          }
+          
+          // Tính phí xe đạp
+          if (bicycleCount > 0) {
+            const bicycleAmount = rate * bicycleCount;
+            parkingTotal += bicycleAmount;
+            vehicleDetails.push({
+              type: 'bicycle',
+              count: bicycleCount,
+              rate: rate,
+              total: bicycleAmount,
+            });
+          }
+          
+          breakdown.push({ 
+            type: "parking", 
+            baseRate: rate, 
+            electricRate: rate * 2,
+            vehicles: vehicleDetails,
+            total: parkingTotal 
+          });
+          total += parkingTotal;
+          console.log(`[calculateRoomFees] Parking with vehicles: total=${parkingTotal}, details=${JSON.stringify(vehicleDetails)}`);
+          
+        } else {
+          // Logic cũ (backward compatible): tính theo số lượng xe đơn giản
+          const vehicleCountNum = Number(vehicleCount) || 0;
+          const amount = rate * vehicleCountNum;
+          breakdown.push({ type: "parking", baseRate: rate, vehicleCount: vehicleCountNum, total: amount });
+          total += amount;
+          console.log(`[calculateRoomFees] Parking (legacy): vehicleCount=${vehicleCountNum}, rate=${rate}, amount=${amount}`);
+        }
+      } else if (rate > 0) {
+        // Không có xe nhưng vẫn hiển thị trong breakdown
+        breakdown.push({ type: "parking", baseRate: rate, vehicleCount: 0, total: 0 });
+        console.log(`[calculateRoomFees] Parking: no vehicles, showing 0`);
       }
     } else {
       console.log(`[calculateRoomFees] Parking not in appliedTypes: ${rf.appliedTypes.join(', ')}`);

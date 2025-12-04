@@ -48,6 +48,8 @@ export const createCashCheckin = async (req, res) => {
       initialElectricReading,
       // Nếu đã có tài khoản thì gửi kèm tenantId
       tenantId,
+      // Danh sách xe của khách thuê
+      vehicles,
     } = req.body || {};
 
     // Validate các trường bắt buộc
@@ -116,6 +118,16 @@ export const createCashCheckin = async (req, res) => {
       },
     };
 
+    // Parse vehicles nếu là string (từ FormData)
+    let parsedVehicles = [];
+    if (vehicles) {
+      try {
+        parsedVehicles = typeof vehicles === 'string' ? JSON.parse(vehicles) : vehicles;
+      } catch (e) {
+        console.error("Error parsing vehicles:", e);
+      }
+    }
+
     // 1) Ghi nhận bản ghi Checkin trước — nguồn dữ liệu gốc cho thông tin khách
     const checkinRecord = await Checkin.create({
       tenantId: tenantId || undefined,
@@ -134,6 +146,7 @@ export const createCashCheckin = async (req, res) => {
       initialElectricReading: initialElectricReading !== undefined && initialElectricReading !== null && initialElectricReading !== "" 
         ? Number(initialElectricReading) 
         : undefined,
+      vehicles: parsedVehicles,
       cccdImages,
       notes,
       status: "CREATED",
@@ -241,6 +254,7 @@ export const createOnlineCheckin = async (req, res) => {
       address,
       initialElectricReading,
       tenantId,
+      vehicles,
     } = req.body || {};
 
     // Debug log
@@ -252,6 +266,7 @@ export const createOnlineCheckin = async (req, res) => {
       address,
       initialElectricReading,
       tenantId,
+      vehicles,
     });
 
     if (!roomId || !checkinDate || !duration || deposit === undefined) {
@@ -317,6 +332,16 @@ export const createOnlineCheckin = async (req, res) => {
       },
     };
 
+    // Parse vehicles nếu là string (từ FormData)
+    let parsedVehicles = [];
+    if (vehicles) {
+      try {
+        parsedVehicles = typeof vehicles === 'string' ? JSON.parse(vehicles) : vehicles;
+      } catch (e) {
+        console.error("Error parsing vehicles:", e);
+      }
+    }
+
     // Tạo bản ghi Checkin
     const checkinRecord = await Checkin.create({
       tenantId: tenantId || undefined,
@@ -335,6 +360,7 @@ export const createOnlineCheckin = async (req, res) => {
       initialElectricReading: initialElectricReading !== undefined && initialElectricReading !== null && initialElectricReading !== "" 
         ? Number(initialElectricReading) 
         : undefined,
+      vehicles: parsedVehicles,
       cccdImages,
       notes,
       status: "CREATED",
@@ -853,4 +879,94 @@ export const extendReceipt = async (req, res) => {
   }
 };
 
-export default { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSampleDocx, cancelCheckin, getAllCheckins, completeCheckin, extendReceipt };
+// Cập nhật danh sách xe cho checkin
+export const updateVehicles = async (req, res) => {
+  try {
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin) return res.status(403).json({ success: false, message: "Forbidden" });
+
+    const { id } = req.params;
+    const { vehicles } = req.body;
+
+    const checkin = await Checkin.findById(id);
+    if (!checkin) return res.status(404).json({ success: false, message: "Checkin not found" });
+
+    // Validate vehicles array
+    if (!Array.isArray(vehicles)) {
+      return res.status(400).json({ success: false, message: "vehicles must be an array" });
+    }
+
+    // Validate từng xe
+    const validTypes = ['motorbike', 'electric_bike', 'bicycle'];
+    for (const vehicle of vehicles) {
+      if (!vehicle.type || !validTypes.includes(vehicle.type)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: `Invalid vehicle type: ${vehicle.type}. Must be one of: ${validTypes.join(', ')}` 
+        });
+      }
+    }
+
+    // Cập nhật vehicles
+    checkin.vehicles = vehicles;
+    await checkin.save();
+
+    // 📝 Log update vehicles
+    await logService.logUpdate({
+      entity: 'CHECKIN',
+      entityId: checkin._id,
+      actorId: req.user._id,
+      data: {
+        action: 'UPDATE_VEHICLES',
+        vehicleCount: vehicles.length,
+        vehicles: vehicles,
+      },
+    });
+
+    return res.status(200).json({ 
+      success: true, 
+      message: "Cập nhật danh sách xe thành công", 
+      data: { 
+        checkinId: checkin._id, 
+        vehicles: checkin.vehicles 
+      } 
+    });
+  } catch (err) {
+    console.error("updateVehicles error:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+// Lấy thông tin checkin theo ID
+export const getCheckinById = async (req, res) => {
+  try {
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin) return res.status(403).json({ success: false, message: "Forbidden" });
+
+    const { id } = req.params;
+    const checkin = await Checkin.findById(id)
+      .populate("tenantId", "fullName email phone role")
+      .populate("staffId", "fullName email phone role")
+      .populate("roomId", "roomNumber pricePerMonth type floor areaM2")
+      .populate("contractId")
+      .populate("receiptBillId");
+
+    if (!checkin) return res.status(404).json({ success: false, message: "Checkin not found" });
+
+    // Convert Decimal128 to numbers
+    const obj = checkin.toObject();
+    obj.deposit = obj.deposit ? parseFloat(obj.deposit.toString()) : 0;
+    obj.monthlyRent = obj.monthlyRent ? parseFloat(obj.monthlyRent.toString()) : 0;
+    if (obj.initialElectricReading !== undefined && obj.initialElectricReading !== null) {
+      obj.initialElectricReading = Number(obj.initialElectricReading);
+    }
+    obj.receiptPaidAt = obj.receiptPaidAt || null;
+
+    return res.status(200).json({ success: true, data: obj });
+  } catch (err) {
+    console.error("getCheckinById error:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+export default { createCashCheckin, createOnlineCheckin, getPrintableSample, downloadSampleDocx, cancelCheckin, getAllCheckins, completeCheckin, extendReceipt, updateVehicles, getCheckinById };

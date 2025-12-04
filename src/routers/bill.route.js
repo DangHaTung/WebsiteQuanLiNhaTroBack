@@ -4,7 +4,9 @@ import {
   createBillSchema, 
   updateBillSchema, 
   billParamsSchema,
-  billIdParamsSchema
+  billIdParamsSchema,
+  publishDraftBillSchema,
+  publishBatchBillsSchema
 } from "../validations/bill.validation.js";
 import { 
   validateBody, 
@@ -27,12 +29,12 @@ router.get("/bills/:id", authenticateToken, authorize('ADMIN'), validateParams(b
 router.post("/bills", authenticateToken, authorize('ADMIN'), validateBody(createBillSchema), asyncHandler(createBill));
 router.put("/bills/:id", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), validateBody(updateBillSchema), asyncHandler(updateBill));
 // Phát hành bill nháp (DRAFT → UNPAID)
-router.put("/bills/:id/publish", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(async (req, res) => {
+router.put("/bills/:id/publish", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), validateBody(publishDraftBillSchema), asyncHandler(async (req, res) => {
   const { publishDraftBill } = await import("../controllers/bill.controller.js");
   return publishDraftBill(req, res);
 }));
 // Phát hành nhiều bills cùng lúc
-router.post("/bills/publish-batch", authenticateToken, authorize('ADMIN'), asyncHandler(async (req, res) => {
+router.post("/bills/publish-batch", authenticateToken, authorize('ADMIN'), validateBody(publishBatchBillsSchema), asyncHandler(async (req, res) => {
   const { publishBatchDraftBills } = await import("../controllers/bill.controller.js");
   return publishBatchDraftBills(req, res);
 }));

@@ -2,12 +2,32 @@ import mongoose from "mongoose";
 
 const { Schema } = mongoose;
 
+// Schema cho thông tin xe
+const vehicleSchema = new Schema(
+  {
+    type: {
+      type: String,
+      enum: ["motorbike", "electric_bike", "bicycle"],
+      required: true,
+    },
+    licensePlate: {
+      type: String,
+      trim: true,
+      // Bắt buộc với xe máy và xe điện, không cần với xe đạp
+    },
+  },
+  { _id: false }
+);
+
 const billSchema = new Schema(
   {
     contractId: { type: Schema.Types.ObjectId, ref: "Contract", required: true },
     finalContractId: { type: Schema.Types.ObjectId, ref: "FinalContract" }, // Link to FinalContract if applicable
     tenantId: { type: Schema.Types.ObjectId, ref: "User" }, // Link to User account (for RECEIPT bills)
     billingDate: { type: Date, required: true },
+    
+    // Thông tin xe chi tiết (thay thế vehicleCount đơn giản)
+    vehicles: { type: [vehicleSchema], default: [] },
 
     // Phân loại bill theo nghiệp vụ
     billType: {
