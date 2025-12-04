@@ -1436,6 +1436,18 @@ export const requestCashPayment = async (req, res) => {
       requestedAmount: amountNum,
     };
 
+    // Lưu ảnh bill chuyển khoản nếu có
+    if (req.file) {
+      bill.metadata.cashPaymentRequest.receiptImage = {
+        url: req.file.path,
+        secure_url: req.file.secure_url || req.file.path,
+        public_id: req.file.filename,
+        resource_type: req.file.resource_type || "image",
+        format: req.file.format,
+        bytes: req.file.size,
+      };
+    }
+
     await bill.save();
 
     return res.status(200).json({
