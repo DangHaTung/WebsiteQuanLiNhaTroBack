@@ -81,6 +81,15 @@ export const createCashCheckin = async (req, res) => {
     const room = await Room.findById(roomId);
     if (!room) return res.status(404).json({ success: false, message: "Room not found" });
 
+    // Validate tiền cọc không vượt quá tiền phòng 1 tháng
+    const monthlyRent = Number(room.pricePerMonth || 0);
+    if (monthlyRent > 0 && depositNum > monthlyRent) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Tiền cọc không được vượt quá tiền phòng 1 tháng (${monthlyRent.toLocaleString('vi-VN')} VNĐ)` 
+      });
+    }
+
     // Lấy thông tin tenant nếu có tenantId
     let tenantInfo = null;
     if (tenantId) {
@@ -93,7 +102,6 @@ export const createCashCheckin = async (req, res) => {
     // Tính ngày bắt đầu và kết thúc check-in
     const startDate = new Date(checkinDate);
     const endDate = addMonths(startDate, duration);
-    const monthlyRent = Number(room.pricePerMonth || 0);
 
     // Xử lý ảnh CCCD
     const cccdFrontFile = Array.isArray(req.files.cccdFront) ? req.files.cccdFront[0] : req.files.cccdFront;
@@ -296,6 +304,15 @@ export const createOnlineCheckin = async (req, res) => {
     const room = await Room.findById(roomId);
     if (!room) return res.status(404).json({ success: false, message: "Room not found" });
 
+    // Validate tiền cọc không vượt quá tiền phòng 1 tháng
+    const monthlyRent = Number(room.pricePerMonth || 0);
+    if (monthlyRent > 0 && depositNum > monthlyRent) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Tiền cọc không được vượt quá tiền phòng 1 tháng (${monthlyRent.toLocaleString('vi-VN')} VNĐ)` 
+      });
+    }
+
     // Lấy thông tin tenant nếu có tenantId
     let tenantInfo = null;
     if (tenantId) {
@@ -307,7 +324,6 @@ export const createOnlineCheckin = async (req, res) => {
 
     const startDate = new Date(checkinDate);
     const endDate = addMonths(startDate, duration);
-    const monthlyRent = Number(room.pricePerMonth || 0);
 
     // Xử lý ảnh CCCD
     const cccdFrontFile = Array.isArray(req.files.cccdFront) ? req.files.cccdFront[0] : req.files.cccdFront;

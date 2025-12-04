@@ -1,5 +1,5 @@
 import express from "express";
-import { getAllBills, getBillById, createBill, updateBill, getMyBills, confirmCashReceipt, cancelBill, calculateMonthlyFees, generatePaymentLink } from "../controllers/bill.controller.js";
+import { getAllBills, getBillById, createBill, updateBill, getMyBills, confirmCashReceipt, rejectCashPayment, cancelBill, calculateMonthlyFees, generatePaymentLink } from "../controllers/bill.controller.js";
 import { 
   createBillSchema, 
   updateBillSchema, 
@@ -40,6 +40,8 @@ router.post("/bills/publish-batch", authenticateToken, authorize('ADMIN'), valid
 }));
 // Xác nhận thanh toán tiền mặt cho RECEIPT bill (admin only)
 router.post("/bills/:id/confirm-payment", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(confirmCashReceipt));
+// Từ chối thanh toán tiền mặt (admin only)
+router.post("/bills/:id/reject-payment", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(rejectCashPayment));
 // Hủy hóa đơn (cancel) thay cho delete
 router.put("/bills/:id/cancel", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(cancelBill));
 // Tính toán phí dịch vụ (cho hoàn cọc)

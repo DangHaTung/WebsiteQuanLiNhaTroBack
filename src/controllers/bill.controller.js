@@ -822,6 +822,83 @@ export const confirmCashReceipt = async (req, res) => {
 };
 
 /**
+ * rejectCashPayment
+ * ----------------
+ * Từ chối thanh toán tiền mặt (admin only)
+ * Chuyển status từ PENDING_CASH_CONFIRM về UNPAID và lưu lý do từ chối
+ */
+export const rejectCashPayment = async (req, res) => {
+  try {
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const { rejectionReason } = req.body;
+    if (!rejectionReason || !rejectionReason.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng nhập lý do từ chối",
+      });
+    }
+
+    const bill = await Bill.findById(req.params.id);
+    if (!bill) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy hóa đơn" });
+    }
+
+    // Chỉ từ chối bill đang chờ xác nhận
+    if (bill.status !== "PENDING_CASH_CONFIRM") {
+      return res.status(400).json({
+        success: false,
+        message: "Chỉ có thể từ chối bill đang chờ xác nhận",
+      });
+    }
+
+    // Cập nhật metadata với lý do từ chối
+    if (!bill.metadata) bill.metadata = {};
+    if (!bill.metadata.cashPaymentRequest) {
+      bill.metadata.cashPaymentRequest = {};
+    }
+    bill.metadata.cashPaymentRequest.rejectionReason = rejectionReason.trim();
+    bill.metadata.cashPaymentRequest.rejectedAt = new Date();
+    bill.metadata.cashPaymentRequest.rejectedBy = req.user._id;
+
+    // Chuyển status về UNPAID để khách có thể thanh toán lại
+    bill.status = "UNPAID";
+
+    await bill.save();
+
+    // 🔔 Gửi thông báo cho khách hàng (nếu có service)
+    try {
+      const notificationService = (await import("../services/notification.service.js")).default;
+      if (notificationService && typeof notificationService.notifyPaymentRejected === 'function') {
+        await notificationService.notifyPaymentRejected(bill, rejectionReason.trim());
+      }
+    } catch (notifError) {
+      console.error("❌ Error sending rejection notification:", notifError.message);
+      // Không throw error để không block flow
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã từ chối thanh toán",
+      data: formatBill(bill),
+    });
+  } catch (err) {
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: "Lỗi khi từ chối thanh toán",
+        error: err.message,
+      });
+  }
+};
+
+/**
  * cancelBill
  * ----------------
  * Hủy bill → chuyển trạng thái VOID
@@ -1414,14 +1491,40 @@ export const requestCashPayment = async (req, res) => {
 
     // Validate amount
     const amountNum = Number(amount);
-    const amountDue = convertDecimal128(bill.amountDue);
-    const amountPaid = convertDecimal128(bill.amountPaid);
-    const balance = amountDue - amountPaid;
-
-    if (amountNum <= 0 || amountNum > balance) {
+    if (isNaN(amountNum) || amountNum <= 0) {
       return res.status(400).json({
         success: false,
         message: "Số tiền thanh toán không hợp lệ",
+      });
+    }
+
+    // Tính balance: Với CONTRACT bill status = UNPAID hoặc PENDING_CASH_CONFIRM: amountPaid có thể là số tiền từ RECEIPT bill
+    // Chỉ trừ amountPaid khi status = PARTIALLY_PAID (đã thanh toán một phần CONTRACT bill)
+    const amountDue = convertDecimal128(bill.amountDue);
+    const amountPaid = convertDecimal128(bill.amountPaid);
+    let balance = 0;
+    
+    if (bill.billType === "CONTRACT" && (bill.status === "UNPAID" || bill.status === "PENDING_CASH_CONFIRM")) {
+      // Với CONTRACT bill UNPAID/PENDING_CASH_CONFIRM: balance = amountDue (KHÔNG trừ amountPaid)
+      balance = amountDue;
+    } else {
+      // Với các trường hợp khác: balance = amountDue - amountPaid
+      balance = amountDue - amountPaid;
+    }
+
+    console.log("💰 requestCashPayment validation:", {
+      billType: bill.billType,
+      status: bill.status,
+      amountNum,
+      amountDue,
+      amountPaid,
+      balance,
+    });
+
+    if (amountNum > balance + 1) {
+      return res.status(400).json({
+        success: false,
+        message: `Số tiền thanh toán (${amountNum.toLocaleString('vi-VN')} VNĐ) vượt quá số tiền còn lại (${balance.toLocaleString('vi-VN')} VNĐ)`,
       });
     }
 

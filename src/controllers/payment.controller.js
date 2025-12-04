@@ -366,8 +366,10 @@ export const createPayment = async (req, res) => {
         if (!bill) return res.status(404).json({ error: "Bill not found" });
 
         // Kiểm tra quyền: chỉ cho phép main tenant thanh toán, không cho co-tenant
-        const userId = req.user._id.toString();
+        // Nếu không có user (optionalAuth), bỏ qua kiểm tra quyền (cho phép guest checkout)
         let hasPermission = false;
+        if (req.user && req.user._id) {
+          const userId = req.user._id.toString();
 
         // 1. Kiểm tra bill.tenantId (cho RECEIPT bills)
         if (bill.tenantId) {
@@ -405,10 +407,14 @@ export const createPayment = async (req, res) => {
           }
         }
 
-        if (!hasPermission) {
-          return res.status(403).json({ 
-            error: "Chỉ người đại diện (người làm hợp đồng) mới có thể thanh toán hóa đơn này" 
-          });
+          if (!hasPermission) {
+            return res.status(403).json({ 
+              error: "Chỉ người đại diện (người làm hợp đồng) mới có thể thanh toán hóa đơn này" 
+            });
+          }
+        } else {
+          // Nếu không có user (guest checkout), cho phép thanh toán
+          hasPermission = true;
         }
 
         // Với CONTRACT bill: tính lại amountDue từ lineItems để đảm bảo chính xác
@@ -446,9 +452,19 @@ export const createPayment = async (req, res) => {
         });
         
         // Validate amount
-        if (Number(amount) <= 0 || Number(amount) > balance + 1) {
-            console.log("❌ Invalid amount - Amount must be between 0 and", balance);
-            return res.status(400).json({ error: "Invalid amount", amount, maxAmount: balance });
+        const amountNum = Number(amount);
+        if (isNaN(amountNum) || amountNum <= 0) {
+            console.log("❌ Invalid amount - Amount must be a positive number:", amount);
+            return res.status(400).json({ error: "Số tiền không hợp lệ", amount, balance });
+        }
+        if (amountNum > balance + 1) {
+            console.log("❌ Invalid amount - Amount exceeds balance:", amountNum, ">", balance);
+            return res.status(400).json({ 
+                error: "Số tiền vượt quá số tiền còn lại", 
+                amount: amountNum, 
+                balance: balance,
+                message: `Số tiền thanh toán (${amountNum.toLocaleString('vi-VN')} VNĐ) vượt quá số tiền còn lại (${balance.toLocaleString('vi-VN')} VNĐ)`
+            });
         }
 
         const providerUpper = provider.toUpperCase();
