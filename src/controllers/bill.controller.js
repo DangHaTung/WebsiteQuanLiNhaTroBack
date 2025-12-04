@@ -150,6 +150,73 @@ export const getMyBills = async (req, res) => {
 
     // Format bills để chuyển đổi Decimal128 sang number (sử dụng filteredBills)
     const formattedBills = filteredBills.map(formatBill);
+    
+    // Tự động tính electricityReading cho các MONTHLY bills chưa có
+    const Checkin = (await import("../models/checkin.model.js")).default;
+    for (const formattedBill of formattedBills) {
+      const hasValidElectricityReading = formattedBill.electricityReading && 
+        (formattedBill.electricityReading.previous !== undefined || formattedBill.electricityReading.current !== undefined);
+      
+      if (formattedBill.billType === "MONTHLY" && !hasValidElectricityReading && formattedBill.contractId) {
+        try {
+          const contractId = typeof formattedBill.contractId === 'object' ? formattedBill.contractId._id : formattedBill.contractId;
+          
+          // Lấy số điện ban đầu từ checkin
+          const checkin = await Checkin.findOne({ contractId }).select("initialElectricReading");
+          const initialReading = checkin?.initialElectricReading || 0;
+          
+          // Lấy tổng số điện đã dùng từ các hóa đơn MONTHLY trước đó
+          const previousBills = await Bill.find({
+            contractId,
+            billType: "MONTHLY",
+            status: { $nin: ["DRAFT", "VOID"] },
+            billingDate: { $lt: formattedBill.billingDate },
+          }).sort({ billingDate: 1 });
+          
+          let totalPreviousKwh = 0;
+          for (const prevBill of previousBills) {
+            if (prevBill.electricityReading?.consumption) {
+              totalPreviousKwh += prevBill.electricityReading.consumption;
+            } else if (prevBill.lineItems) {
+              for (const item of prevBill.lineItems) {
+                if (item.item && item.item.includes("Tiền điện")) {
+                  const match = item.item.match(/\((\d+(?:\.\d+)?)\s*kWh\)/i);
+                  if (match && match[1]) {
+                    totalPreviousKwh += Number(match[1]) || 0;
+                  }
+                }
+              }
+            }
+          }
+          
+          // Parse số kWh tiêu thụ từ lineItems của bill hiện tại
+          let currentConsumption = 0;
+          if (formattedBill.lineItems) {
+            for (const item of formattedBill.lineItems) {
+              if (item.item && item.item.includes("Tiền điện")) {
+                const match = item.item.match(/\((\d+(?:\.\d+)?)\s*kWh\)/i);
+                if (match && match[1]) {
+                  currentConsumption = Number(match[1]) || 0;
+                  break;
+                }
+              }
+            }
+          }
+          
+          // Tính số điện cũ và mới
+          const previousReading = initialReading + totalPreviousKwh;
+          const currentReading = previousReading + currentConsumption;
+          
+          formattedBill.electricityReading = {
+            previous: previousReading,
+            current: currentReading,
+            consumption: currentConsumption,
+          };
+        } catch (calcError) {
+          console.error("Error calculating electricityReading:", calcError);
+        }
+      }
+    }
 
     // Tính lại total: đếm tất cả bills sau khi filter (không giới hạn limit)
     // Lưu ý: pagination có thể không chính xác 100% vì filter sau khi query
@@ -286,6 +353,76 @@ export const getBillById = async (req, res) => {
 
     // Format bill để chuyển đổi Decimal128 sang number
     const formattedBill = formatBill(bill);
+    
+    // Nếu là MONTHLY bill và chưa có electricityReading đầy đủ, tự động tính từ checkin và bills trước
+    const hasValidElectricityReading = bill.electricityReading && 
+      (bill.electricityReading.previous !== undefined || bill.electricityReading.current !== undefined);
+    
+    if (bill.billType === "MONTHLY" && !hasValidElectricityReading && bill.contractId) {
+      try {
+        const Checkin = (await import("../models/checkin.model.js")).default;
+        const contractId = typeof bill.contractId === 'object' ? bill.contractId._id : bill.contractId;
+        
+        // Lấy số điện ban đầu từ checkin
+        const checkin = await Checkin.findOne({ contractId }).select("initialElectricReading");
+        const initialReading = checkin?.initialElectricReading || 0;
+        
+        // Lấy tổng số điện đã dùng từ các hóa đơn MONTHLY trước đó (không phải DRAFT)
+        const previousBills = await Bill.find({
+          contractId,
+          billType: "MONTHLY",
+          status: { $nin: ["DRAFT", "VOID"] },
+          billingDate: { $lt: bill.billingDate },
+        }).sort({ billingDate: 1 });
+        
+        let totalPreviousKwh = 0;
+        for (const prevBill of previousBills) {
+          if (prevBill.electricityReading?.consumption) {
+            totalPreviousKwh += prevBill.electricityReading.consumption;
+          } else if (prevBill.lineItems) {
+            // Parse từ lineItems nếu không có electricityReading
+            for (const item of prevBill.lineItems) {
+              if (item.item && item.item.includes("Tiền điện")) {
+                const match = item.item.match(/\((\d+(?:\.\d+)?)\s*kWh\)/i);
+                if (match && match[1]) {
+                  totalPreviousKwh += Number(match[1]) || 0;
+                }
+              }
+            }
+          }
+        }
+        
+        // Parse số kWh tiêu thụ từ lineItems của bill hiện tại
+        let currentConsumption = 0;
+        if (bill.lineItems) {
+          for (const item of bill.lineItems) {
+            if (item.item && item.item.includes("Tiền điện")) {
+              const match = item.item.match(/\((\d+(?:\.\d+)?)\s*kWh\)/i);
+              if (match && match[1]) {
+                currentConsumption = Number(match[1]) || 0;
+                break;
+              }
+            }
+          }
+        }
+        
+        // Tính số điện cũ và mới
+        const previousReading = initialReading + totalPreviousKwh;
+        const currentReading = previousReading + currentConsumption;
+        
+        // Thêm electricityReading vào formattedBill (không lưu vào DB)
+        formattedBill.electricityReading = {
+          previous: previousReading,
+          current: currentReading,
+          consumption: currentConsumption,
+        };
+        
+        console.log(`📊 [getBillById] Calculated electricityReading for bill ${bill._id}:`, formattedBill.electricityReading);
+      } catch (calcError) {
+        console.error("Error calculating electricityReading:", calcError);
+        // Không throw error, chỉ log
+      }
+    }
 
     res.status(200).json({
       message: "Lấy hóa đơn thành công",
@@ -817,6 +954,8 @@ export const publishDraftBill = async (req, res) => {
       occupantCount = 1,
       vehicleCount = 0, // Deprecated: dùng vehicles thay thế
       vehicles = [], // Danh sách xe chi tiết [{type, licensePlate}]
+      previousReading, // Số điện cũ (kỳ trước)
+      currentReading, // Số điện mới (kỳ này)
     } = req.body;
 
     // Tính tổng số xe từ vehicles array hoặc vehicleCount
@@ -901,6 +1040,16 @@ export const publishDraftBill = async (req, res) => {
       String(feeCalculation.totalAmount)
     );
     bill.vehicles = vehicles; // Lưu thông tin xe vào bill
+    
+    // Lưu thông tin số điện chi tiết
+    if (previousReading !== undefined && currentReading !== undefined) {
+      bill.electricityReading = {
+        previous: Number(previousReading),
+        current: Number(currentReading),
+        consumption: Number(electricityKwh),
+      };
+    }
+    
     bill.updatedAt = new Date();
 
     await bill.save();
@@ -952,6 +1101,8 @@ export const publishBatchDraftBills = async (req, res) => {
           occupantCount = 1,
           vehicleCount = 0, // Deprecated
           vehicles = [], // Danh sách xe chi tiết
+          previousReading, // Số điện cũ
+          currentReading, // Số điện mới
         } = item;
 
         // Tính tổng số xe
@@ -1025,6 +1176,16 @@ export const publishBatchDraftBills = async (req, res) => {
           String(feeCalculation.totalAmount)
         );
         bill.vehicles = vehicles; // Lưu thông tin xe
+        
+        // Lưu thông tin số điện chi tiết
+        if (previousReading !== undefined && currentReading !== undefined) {
+          bill.electricityReading = {
+            previous: Number(previousReading),
+            current: Number(currentReading),
+            consumption: Number(electricityKwh),
+          };
+        }
+        
         bill.updatedAt = new Date();
         await bill.save();
 

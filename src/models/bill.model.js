@@ -29,6 +29,13 @@ const billSchema = new Schema(
     // Thông tin xe chi tiết (thay thế vehicleCount đơn giản)
     vehicles: { type: [vehicleSchema], default: [] },
 
+    // Thông tin số điện (để hiển thị chi tiết trong hóa đơn)
+    electricityReading: {
+      previous: { type: Number }, // Số điện cũ (kỳ trước)
+      current: { type: Number },  // Số điện mới (kỳ này)
+      consumption: { type: Number }, // Số điện tiêu thụ = current - previous
+    },
+
     // Phân loại bill theo nghiệp vụ
     billType: {
       type: String,
