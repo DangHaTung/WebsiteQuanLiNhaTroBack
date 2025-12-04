@@ -397,8 +397,17 @@ export async function createMonthlyBillForRoom({
     amountDue: toDec(feeCalculation.totalAmount),
     amountPaid: toDec(0),
     payments: [],
-    note: note || `Hóa đơn tháng ${billingMonth.getMonth() + 1}/${billingMonth.getFullYear()} - Phòng ${room.roomNumber}`,
+    note: note || generateBillNote(billingMonth, room.roomNumber),
   });
+
+  // Helper function để tạo ghi chú hóa đơn với tháng trước
+  function generateBillNote(billingDate, roomNumber) {
+    // Hóa đơn tạo vào tháng X là để thu tiền của tháng X-1 (tháng trước)
+    // Ví dụ: tạo hóa đơn vào tháng 12/2025 → thu tiền tháng 11/2025
+    const previousMonth = new Date(billingDate);
+    previousMonth.setMonth(previousMonth.getMonth() - 1);
+    return `Hóa đơn tháng ${previousMonth.getMonth() + 1}/${previousMonth.getFullYear()} - Phòng ${roomNumber}`;
+  }
 
   await bill.save();
 
