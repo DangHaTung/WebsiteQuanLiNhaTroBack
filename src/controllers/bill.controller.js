@@ -343,7 +343,15 @@ export const getAllBills = async (req, res) => {
  */
 export const getBillById = async (req, res) => {
   try {
-    const bill = await Bill.findById(req.params.id).populate("contractId");
+    const bill = await Bill.findById(req.params.id)
+      .populate({
+        path: "contractId",
+        populate: [
+          { path: "tenantId", select: "fullName email phone" },
+          { path: "roomId", select: "name roomNumber" },
+        ],
+      })
+      .populate("tenantId", "fullName email phone");
     if (!bill) {
       return res.status(404).json({
         message: "Không tìm thấy hóa đơn",
