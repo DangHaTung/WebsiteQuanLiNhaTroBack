@@ -77,23 +77,35 @@ export const getMyBills = async (req, res) => {
     // Lấy tất cả contractIds và finalContractIds (bao gồm co-tenant)
     const { contractIds, finalContractIds } = await getUserContractIds(userId);
 
-    // Lọc finalContractIds: chỉ lấy FinalContract chưa bị hủy
+    // Lấy tất cả FinalContractIds (bao gồm cả đã hủy) để lấy bills đã thanh toán
     const FinalContract = (await import("../models/finalContract.model.js"))
       .default;
-    const activeFinalContracts = await FinalContract.find({
+    const allFinalContracts = await FinalContract.find({
       _id: { $in: finalContractIds },
-      status: { $ne: "CANCELED" },
-    }).select("_id");
-    const activeFinalContractIds = activeFinalContracts.map((fc) => fc._id);
+    }).select("_id status");
+    const activeFinalContractIds = allFinalContracts
+      .filter(fc => fc.status !== "CANCELED")
+      .map((fc) => fc._id);
+    const canceledFinalContractIds = allFinalContracts
+      .filter(fc => fc.status === "CANCELED")
+      .map((fc) => fc._id);
 
     // Tìm bills từ cả Contract và FinalContract, hoặc bills có tenantId = userId (RECEIPT bills)
     const filterConditions = [];
     if (contractIds.length > 0) {
       filterConditions.push({ contractId: { $in: contractIds } });
     }
+    // Lấy bills từ FinalContract chưa hủy (tất cả bills)
     if (activeFinalContractIds.length > 0) {
       filterConditions.push({
         finalContractId: { $in: activeFinalContractIds },
+      });
+    }
+    // Lấy bills đã thanh toán từ FinalContract đã hủy (chỉ bills PAID)
+    if (canceledFinalContractIds.length > 0) {
+      filterConditions.push({
+        finalContractId: { $in: canceledFinalContractIds },
+        status: "PAID", // Chỉ lấy bills đã thanh toán từ FinalContract đã hủy
       });
     }
     // Thêm điều kiện lấy bills có tenantId = userId (cho RECEIPT bills)
@@ -132,7 +144,8 @@ export const getMyBills = async (req, res) => {
       .limit(parseInt(limit))
       .skip(skip);
 
-    // Filter thêm: loại bỏ bills của FinalContract đã bị hủy
+    // Filter thêm: loại bỏ bills chưa thanh toán của FinalContract đã bị hủy
+    // Nhưng giữ lại bills đã thanh toán (PAID) ngay cả khi FinalContract đã hủy
     const filteredBills = bills.filter((bill) => {
       if (bill.finalContractId) {
         const finalContract = bill.finalContractId;
@@ -140,8 +153,8 @@ export const getMyBills = async (req, res) => {
           typeof finalContract === "object" && finalContract.status
             ? finalContract.status
             : null;
-        // Nếu FinalContract đã bị hủy, không hiển thị bill này
-        if (finalContractStatus === "CANCELED") {
+        // Nếu FinalContract đã bị hủy và bill chưa thanh toán, không hiển thị
+        if (finalContractStatus === "CANCELED" && bill.status !== "PAID") {
           return false;
         }
       }
@@ -232,7 +245,8 @@ export const getMyBills = async (req, res) => {
           typeof finalContract === "object" && finalContract.status
             ? finalContract.status
             : null;
-        if (finalContractStatus === "CANCELED") {
+        // Nếu FinalContract đã bị hủy và bill chưa thanh toán, không đếm
+        if (finalContractStatus === "CANCELED" && bill.status !== "PAID") {
           return false;
         }
       }
@@ -1729,14 +1743,38 @@ export const generatePaymentLink = async (req, res) => {
       });
     }
 
-    const bill = await Bill.findById(billId).populate({
-      path: "contractId",
-      select: "tenantSnapshot pricingSnapshot roomId", // Include roomId để populate room
-      populate: {
-        path: "roomId",
-        select: "roomNumber", // Populate room để lấy roomNumber
+    console.log("🔍 generatePaymentLink - billId:", billId);
+
+    const bill = await Bill.findById(billId).populate([
+      {
+        path: "contractId",
+        select: "tenantSnapshot pricingSnapshot roomId tenantId", // Include tenantId và roomId
+        populate: [
+          {
+            path: "roomId",
+            select: "roomNumber", // Populate room để lấy roomNumber
+          },
+          {
+            path: "tenantId",
+            select: "email fullName", // Populate tenant để lấy email
+          },
+        ],
       },
-    });
+      {
+        path: "finalContractId",
+        select: "tenantId roomId", // Include tenantId và roomId từ FinalContract
+        populate: [
+          {
+            path: "tenantId",
+            select: "email fullName", // Populate tenant để lấy email
+          },
+          {
+            path: "roomId",
+            select: "roomNumber", // Populate room để lấy roomNumber
+          },
+        ],
+      },
+    ]);
     if (!bill) {
       return res.status(404).json({
         success: false,
@@ -1748,11 +1786,11 @@ export const generatePaymentLink = async (req, res) => {
     console.log("🔍 Bill contractId:", bill.contractId?._id);
     console.log("🔍 Bill contractId type:", typeof bill.contractId);
 
-    // Chỉ cho phép generate link cho bill RECEIPT chưa thanh toán
-    if (bill.billType !== "RECEIPT") {
+    // Cho phép generate link cho bill RECEIPT và CONTRACT chưa thanh toán
+    if (bill.billType !== "RECEIPT" && bill.billType !== "CONTRACT") {
       return res.status(400).json({
         success: false,
-        message: "Chỉ có thể tạo link thanh toán cho phiếu thu (RECEIPT)",
+        message: "Chỉ có thể tạo link thanh toán cho phiếu thu (RECEIPT) hoặc hóa đơn hợp đồng (CONTRACT)",
       });
     }
 
@@ -1763,9 +1801,11 @@ export const generatePaymentLink = async (req, res) => {
       });
     }
 
-    // Lấy thông tin contract để lấy tenantSnapshot
+    // Lấy thông tin contract
     const contract = bill.contractId;
-    if (!contract || !contract.tenantSnapshot) {
+    
+    // Với RECEIPT bill: cần có contract và tenantSnapshot
+    if (bill.billType === "RECEIPT" && (!contract || !contract.tenantSnapshot)) {
       console.error("❌ Contract không có tenantSnapshot:", {
         billId,
         contractId: contract?._id,
@@ -1777,68 +1817,82 @@ export const generatePaymentLink = async (req, res) => {
         message: "Contract không có thông tin người thuê",
       });
     }
+    
+    // Với CONTRACT bill: cần có finalContractId hoặc contract
+    if (bill.billType === "CONTRACT" && !bill.finalContractId && !contract) {
+      return res.status(400).json({
+        success: false,
+        message: "Bill không có thông tin hợp đồng",
+      });
+    }
 
-    // Debug log để kiểm tra tenantSnapshot
-    console.log(
-      "🔍 Contract tenantSnapshot:",
-      JSON.stringify(contract.tenantSnapshot, null, 2)
-    );
-    console.log(
-      "🔍 Contract tenantSnapshot.email:",
-      contract.tenantSnapshot?.email
-    );
+    // Lấy thông tin tenant email từ nhiều nguồn
+    let tenantEmail = null;
+    
+    // Với CONTRACT bill: ưu tiên lấy từ finalContractId.tenantId
+    if (bill.billType === "CONTRACT" && bill.finalContractId) {
+      const finalContract = bill.finalContractId;
+      if (finalContract.tenantId) {
+        const tenant = typeof finalContract.tenantId === 'object' 
+          ? finalContract.tenantId 
+          : null;
+        if (tenant?.email) {
+          tenantEmail = tenant.email;
+          console.log("✅ Email từ FinalContract.tenantId:", tenantEmail);
+        }
+      }
+    }
+    
+    // Với RECEIPT bill hoặc nếu CONTRACT bill chưa có email: lấy từ contractId.tenantSnapshot hoặc contractId.tenantId
+    if (!tenantEmail && contract) {
+      // Ưu tiên lấy từ tenantId (nếu có)
+      if (contract.tenantId) {
+        const tenant = typeof contract.tenantId === 'object' 
+          ? contract.tenantId 
+          : null;
+        if (tenant?.email) {
+          tenantEmail = tenant.email;
+          console.log("✅ Email từ Contract.tenantId:", tenantEmail);
+        }
+      }
+      
+      // Nếu không có, lấy từ tenantSnapshot
+      if (!tenantEmail && contract.tenantSnapshot?.email) {
+        tenantEmail = contract.tenantSnapshot.email;
+        console.log("✅ Email từ Contract.tenantSnapshot:", tenantEmail);
+      }
+    }
 
-    let tenantEmail = contract.tenantSnapshot?.email;
-
-    // Nếu không có email trong tenantSnapshot, thử các nguồn khác
+    // Nếu vẫn chưa có email, thử các nguồn khác
     if (!tenantEmail) {
-      console.warn("⚠️ Contract không có email, thử lấy từ các nguồn khác...");
+      console.warn("⚠️ Chưa có email, thử lấy từ các nguồn khác...");
 
       // Ưu tiên 1: Email từ request body (admin nhập)
       if (emailFromBody) {
-        contract.tenantSnapshot = contract.tenantSnapshot || {};
-        contract.tenantSnapshot.email = emailFromBody;
-        await contract.save();
         tenantEmail = emailFromBody;
-        console.log("✅ Đã cập nhật email từ request body vào contract");
+        console.log("✅ Sử dụng email từ request body:", tenantEmail);
       }
-      // Ưu tiên 2: Email từ checkin
-      else {
+      // Ưu tiên 2: Email từ checkin (chỉ cho RECEIPT bill)
+      else if (bill.billType === "RECEIPT") {
         const Checkin = (await import("../models/checkin.model.js")).default;
         const checkin = await Checkin.findOne({ receiptBillId: billId });
         console.log("🔍 Checkin found:", checkin ? "Yes" : "No");
-        if (checkin) {
-          console.log(
-            "🔍 Checkin tenantSnapshot:",
-            JSON.stringify(checkin.tenantSnapshot, null, 2)
-          );
-          console.log(
-            "🔍 Checkin tenantSnapshot.email:",
-            checkin.tenantSnapshot?.email
-          );
-        }
         if (checkin?.tenantSnapshot?.email) {
-          contract.tenantSnapshot = contract.tenantSnapshot || {};
-          contract.tenantSnapshot.email = checkin.tenantSnapshot.email;
-          await contract.save();
           tenantEmail = checkin.tenantSnapshot.email;
-          console.log(
-            "✅ Đã cập nhật email từ checkin vào contract:",
-            tenantEmail
-          );
+          console.log("✅ Email từ checkin:", tenantEmail);
         } else {
           console.warn("⚠️ Checkin cũng không có email");
         }
       }
-    } else {
-      console.log("✅ Email từ contract.tenantSnapshot:", tenantEmail);
     }
 
     if (!tenantEmail) {
-      console.error("❌ Contract tenantSnapshot không có email:", {
+      console.error("❌ Không tìm thấy email:", {
         billId,
-        contractId: contract._id,
-        tenantSnapshot: contract.tenantSnapshot,
+        billType: bill.billType,
+        contractId: contract?._id,
+        finalContractId: bill.finalContractId?._id || bill.finalContractId,
+        tenantSnapshot: contract?.tenantSnapshot,
         emailFromBody,
       });
       return res.status(400).json({
@@ -1875,24 +1929,53 @@ export const generatePaymentLink = async (req, res) => {
 
       // Get roomNumber from various sources
       let roomNumber = "N/A";
-      if (contract.pricingSnapshot?.roomNumber) {
-        roomNumber = contract.pricingSnapshot.roomNumber;
-      } else if (
-        contract.roomId &&
-        typeof contract.roomId === "object" &&
-        contract.roomId.roomNumber
-      ) {
-        roomNumber = contract.roomId.roomNumber;
-      } else if (typeof contract.roomId === "string") {
-        // If roomId is just an ID, try to fetch it
-        const Room = (await import("../models/room.model.js")).default;
-        const room = await Room.findById(contract.roomId).select("roomNumber");
-        if (room) roomNumber = room.roomNumber;
+      
+      // Với CONTRACT bill: lấy từ finalContractId.roomId (đã được populate)
+      if (bill.billType === "CONTRACT" && bill.finalContractId) {
+        const finalContract = bill.finalContractId;
+        if (finalContract.roomId) {
+          const room = finalContract.roomId;
+          roomNumber = typeof room === 'object' && room.roomNumber 
+            ? room.roomNumber 
+            : (typeof room === 'string' ? room : "N/A");
+        }
+      }
+      // Với RECEIPT bill: lấy từ contract
+      else if (contract) {
+        if (contract.pricingSnapshot?.roomNumber) {
+          roomNumber = contract.pricingSnapshot.roomNumber;
+        } else if (
+          contract.roomId &&
+          typeof contract.roomId === "object" &&
+          contract.roomId.roomNumber
+        ) {
+          roomNumber = contract.roomId.roomNumber;
+        } else if (typeof contract.roomId === "string") {
+          // If roomId is just an ID, try to fetch it
+          const Room = (await import("../models/room.model.js")).default;
+          const room = await Room.findById(contract.roomId).select("roomNumber");
+          if (room) roomNumber = room.roomNumber;
+        }
+      }
+
+      // Lấy fullName từ nhiều nguồn
+      let fullName = "Khách hàng";
+      if (bill.billType === "CONTRACT" && bill.finalContractId?.tenantId) {
+        const tenant = typeof bill.finalContractId.tenantId === 'object' 
+          ? bill.finalContractId.tenantId 
+          : null;
+        if (tenant?.fullName) {
+          fullName = tenant.fullName;
+        }
+      } else if (contract?.tenantSnapshot?.fullName) {
+        fullName = contract.tenantSnapshot.fullName;
+      } else if (contract?.tenantId && typeof contract.tenantId === 'object' && contract.tenantId.fullName) {
+        fullName = contract.tenantId.fullName;
       }
 
       await sendPaymentLinkEmail({
         to: tenantEmail,
-        fullName: contract.tenantSnapshot?.fullName || "Khách hàng",
+        fullName,
         paymentUrl,
         billId: bill._id.toString(),
         amount: amountNum,
