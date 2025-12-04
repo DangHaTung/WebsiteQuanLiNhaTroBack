@@ -119,6 +119,14 @@ export const createMoveOutRequest = async (req, res) => {
       });
     }
 
+    // Kiểm tra contract đã được hoàn cọc chưa
+    if (contract.depositRefunded) {
+      return res.status(400).json({
+        success: false,
+        message: "Hợp đồng này đã được hoàn cọc trước đó, không thể tạo yêu cầu hoàn cọc mới",
+      });
+    }
+
     // Kiểm tra đã có yêu cầu PENDING chưa
     const existingRequest = await MoveOutRequest.findOne({
       contractId: contract._id,
@@ -187,6 +195,27 @@ export const getMyMoveOutRequests = async (req, res) => {
   try {
     const userId = req.user._id;
 
+    // Tự động confirm các request đã quá 3 ngày (WAITING_CONFIRMATION -> COMPLETED)
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    
+    await MoveOutRequest.updateMany(
+      {
+        tenantId: userId,
+        status: "WAITING_CONFIRMATION",
+        refundProcessed: true,
+        refundedAt: { $lte: threeDaysAgo },
+        refundConfirmed: false,
+      },
+      {
+        $set: {
+          status: "COMPLETED",
+          refundConfirmed: true,
+          refundConfirmedAt: new Date(),
+        },
+      }
+    );
+
     const requests = await MoveOutRequest.find({ tenantId: userId })
       .populate("roomId", "roomNumber")
       .populate({
@@ -239,6 +268,8 @@ export const getAllMoveOutRequests = async (req, res) => {
     const { status } = req.query;
     const filter = {};
     if (status) filter.status = status;
+
+    // KHÔNG tự động confirm - client phải bấm confirm thủ công
 
     const requests = await MoveOutRequest.find(filter)
       .populate("roomId", "roomNumber")
@@ -377,6 +408,99 @@ export const updateMoveOutRequestStatus = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// Client: Xác nhận đã nhận được tiền hoàn cọc
+export const confirmRefund = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?._id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const request = await MoveOutRequest.findById(id);
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Move-out request not found",
+      });
+    }
+
+    // Chỉ cho phép tenant của request này xác nhận
+    if (String(request.tenantId) !== String(userId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden: You can only confirm your own refund",
+      });
+    }
+
+    // Chấp nhận cả WAITING_CONFIRMATION và COMPLETED (để cho phép confirm)
+    if (!["WAITING_CONFIRMATION", "COMPLETED"].includes(request.status) || !request.refundProcessed) {
+      return res.status(400).json({
+        success: false,
+        message: "Refund has not been processed yet or request is not in valid status",
+      });
+    }
+
+    if (request.refundConfirmed) {
+      return res.status(400).json({
+        success: false,
+        message: "Refund already confirmed",
+      });
+    }
+
+    request.refundConfirmed = true;
+    request.refundConfirmedAt = new Date();
+    // Nếu đang ở WAITING_CONFIRMATION, chuyển sang COMPLETED khi client confirm
+    if (request.status === "WAITING_CONFIRMATION") {
+      request.status = "COMPLETED";
+    }
+    await request.save();
+
+    const populated = await MoveOutRequest.findById(request._id)
+      .populate("roomId", "roomNumber")
+      .populate({
+        path: "contractId",
+        select: "startDate endDate deposit depositRefund depositRefunded",
+      })
+      .populate("tenantId", "fullName email phone");
+
+    // Format Decimal128 values
+    const formatted = populated.toObject();
+    if (formatted.contractId) {
+      if (formatted.contractId.deposit) {
+        formatted.contractId.deposit = convertDecimal128(formatted.contractId.deposit);
+      }
+      if (formatted.contractId.depositRefund?.amount) {
+        formatted.contractId.depositRefund.amount = convertDecimal128(formatted.contractId.depositRefund.amount);
+      }
+      if (formatted.contractId.depositRefund?.damageAmount) {
+        formatted.contractId.depositRefund.damageAmount = convertDecimal128(formatted.contractId.depositRefund.damageAmount);
+      }
+      if (formatted.contractId.depositRefund?.finalMonthServiceFee) {
+        formatted.contractId.depositRefund.finalMonthServiceFee = convertDecimal128(formatted.contractId.depositRefund.finalMonthServiceFee);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã xác nhận nhận được tiền hoàn cọc",
+      data: formatted,
+    });
+  } catch (error) {
+    console.error("confirmRefund error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi xác nhận hoàn cọc",
       error: error.message,
     });
   }

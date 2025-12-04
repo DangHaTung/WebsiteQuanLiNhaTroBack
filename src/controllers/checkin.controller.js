@@ -727,6 +727,19 @@ export const extendReceipt = async (req, res) => {
       return res.status(404).json({ success: false, message: "Checkin not found" });
     }
 
+    // Kiểm tra xem có FinalContract đã được ký chưa
+    if (checkin.finalContractId) {
+      const FinalContract = (await import("../models/finalContract.model.js")).default;
+      const finalContract = await FinalContract.findById(checkin.finalContractId);
+      
+      if (finalContract && finalContract.status === "SIGNED") {
+        return res.status(400).json({
+          success: false,
+          message: "Không thể gia hạn phiếu thu vì hợp đồng đã được ký"
+        });
+      }
+    }
+
     // Kiểm tra checkin đã thanh toán phiếu thu chưa (phải có receiptPaidAt)
     if (!checkin.receiptPaidAt) {
       return res.status(400).json({ 

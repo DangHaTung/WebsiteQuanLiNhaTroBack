@@ -922,6 +922,13 @@ export const extendContract = async (req, res) => {
       });
     }
 
+    if (extensionMonths > 36) {
+      return res.status(400).json({
+        success: false,
+        message: "Không thể gia hạn quá 36 tháng"
+      });
+    }
+
     // Tìm FinalContract
     const finalContract = await FinalContract.findById(id)
       .populate("tenantId", "fullName email phone")
@@ -942,8 +949,30 @@ export const extendContract = async (req, res) => {
       });
     }
 
-    // Tính endDate mới
+    // Tính thời hạn hợp đồng hiện tại (từ startDate đến endDate)
+    const startDate = new Date(finalContract.startDate);
     const currentEndDate = new Date(finalContract.endDate);
+    const currentDurationMonths = (currentEndDate.getFullYear() - startDate.getFullYear()) * 12 
+      + (currentEndDate.getMonth() - startDate.getMonth());
+    
+    // Validate: Nếu thời hạn hợp đồng hiện tại >= 36 tháng thì không thể gia hạn thêm
+    if (currentDurationMonths >= 36) {
+      return res.status(400).json({
+        success: false,
+        message: `Không thể gia hạn hợp đồng. Thời hạn hợp đồng hiện tại đã đạt tối đa 36 tháng (${currentDurationMonths} tháng)`
+      });
+    }
+
+    // Validate: Nếu gia hạn thêm sẽ vượt quá 36 tháng tổng cộng
+    const totalDurationAfterExtension = currentDurationMonths + parseInt(extensionMonths);
+    if (totalDurationAfterExtension > 36) {
+      return res.status(400).json({
+        success: false,
+        message: `Không thể gia hạn thêm ${extensionMonths} tháng. Thời hạn hợp đồng sau gia hạn sẽ là ${totalDurationAfterExtension} tháng, vượt quá giới hạn 36 tháng. Số tháng tối đa có thể gia hạn: ${36 - currentDurationMonths} tháng`
+      });
+    }
+
+    // Tính endDate mới
     const newEndDate = new Date(currentEndDate);
     newEndDate.setMonth(newEndDate.getMonth() + parseInt(extensionMonths));
 

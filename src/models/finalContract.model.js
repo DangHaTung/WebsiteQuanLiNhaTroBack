@@ -56,6 +56,12 @@ const finalContractSchema = new Schema(
     // Co-tenant support - cho phép tạo FinalContract cho người ở cùng
     linkedContractId: { type: Schema.Types.ObjectId, ref: "Contract" }, // Link đến Contract chính
     isCoTenant: { type: Boolean, default: false }, // Flag để biết đây là FinalContract cho người ở cùng
+
+    // Metadata để lưu thông tin linh hoạt (ví dụ: lịch sử gia hạn)
+    metadata: {
+      type: Schema.Types.Mixed,
+      default: {}
+    },
   },
   { timestamps: true, versionKey: false }
 );

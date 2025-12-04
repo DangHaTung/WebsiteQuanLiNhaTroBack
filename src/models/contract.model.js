@@ -63,6 +63,7 @@ const contractSchema = new Schema(
       damageAmount: { type: mongoose.Schema.Types.Decimal128 }, // Thiệt hại
       damageNote: { type: String }, // Ghi chú thiệt hại
       finalMonthServiceFee: { type: mongoose.Schema.Types.Decimal128 }, // Dịch vụ tháng cuối
+      initialDeposit: { type: mongoose.Schema.Types.Decimal128 }, // Tiền cọc ban đầu (1 tháng tiền phòng) để hiển thị đúng
     },
     // Người ở cùng (co-tenants) - cho phép nhiều người ở chung phòng
     coTenants: [

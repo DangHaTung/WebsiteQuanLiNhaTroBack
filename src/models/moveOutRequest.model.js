@@ -12,13 +12,16 @@ const moveOutRequestSchema = new Schema(
     reason: { type: String, required: true, trim: true, maxLength: 500 },
     status: {
       type: String,
-      enum: ["PENDING", "APPROVED", "REJECTED", "COMPLETED"],
+      enum: ["PENDING", "APPROVED", "REJECTED", "WAITING_CONFIRMATION", "COMPLETED"],
       default: "PENDING",
     },
     adminNote: { type: String, trim: true, maxLength: 500 },
     processedBy: { type: Schema.Types.ObjectId, ref: "User" }, // Admin/Staff xử lý
     processedAt: { type: Date },
     refundProcessed: { type: Boolean, default: false }, // Đánh dấu đã hoàn cọc
+    refundedAt: { type: Date }, // Thời gian admin hoàn cọc (để tính 3 ngày tự động confirm)
+    refundConfirmed: { type: Boolean, default: false }, // Đánh dấu client đã xác nhận nhận được tiền
+    refundConfirmedAt: { type: Date }, // Thời gian client xác nhận
     refundQrCode: {
       url: { type: String },
       secure_url: { type: String },
