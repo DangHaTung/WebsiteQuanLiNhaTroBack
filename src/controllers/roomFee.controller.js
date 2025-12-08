@@ -146,7 +146,7 @@ export const calculateRoomFees = async (req, res) => {
       total += monthlyRent;
     }
 
-    // Electricity
+    // Electricity (với lãi 5%)
     if (rf.appliedTypes.includes("electricity") && kwh > 0) {
       const activeEl = await UtilityFee.findOne({ type: "electricity", isActive: true });
       
@@ -170,22 +170,38 @@ export const calculateRoomFees = async (req, res) => {
       }
       
       const vatPercent = typeof activeEl?.vatPercent === "number" ? activeEl.vatPercent : 8;
+      const profitMargin = 0.05; // Lãi 5%
       
       // Debug logging
-      console.log(`[calculateRoomFees] Electricity calculation: kwh=${kwh}, tiers count=${tiers?.length || 0}, vatPercent=${vatPercent}`);
+      console.log(`[calculateRoomFees] Electricity calculation: kwh=${kwh}, tiers count=${tiers?.length || 0}, vatPercent=${vatPercent}, profitMargin=${profitMargin * 100}%`);
       if (tiers && tiers.length > 0) {
         console.log(`[calculateRoomFees] Tiers:`, JSON.stringify(tiers, null, 2));
       }
       
       const resEl = calculateElectricityCost(kwh, tiers, vatPercent);
       
-      console.log(`[calculateRoomFees] Electricity result: subtotal=${resEl.subtotal}, vat=${resEl.vat}, total=${resEl.total}`);
+      // Thêm lãi 5%
+      const costPrice = resEl.total; // Giá gốc (chưa lãi)
+      const profitAmount = costPrice * profitMargin; // Tiền lãi
+      const totalWithProfit = costPrice + profitAmount; // Giá bán (đã có lãi)
+      
+      console.log(`[calculateRoomFees] Electricity result: subtotal=${resEl.subtotal}, vat=${resEl.vat}, costPrice=${costPrice}, profitAmount=${profitAmount}, total=${totalWithProfit}`);
       if (resEl.items && resEl.items.length > 0) {
         console.log(`[calculateRoomFees] Electricity items:`, JSON.stringify(resEl.items, null, 2));
       }
       
-      breakdown.push({ type: "electricity", kwh, tiers: resEl.items, subtotal: resEl.subtotal, vat: resEl.vat, total: resEl.total });
-      total += resEl.total;
+      breakdown.push({ 
+        type: "electricity", 
+        kwh, 
+        tiers: resEl.items, 
+        subtotal: resEl.subtotal, 
+        vat: resEl.vat, 
+        costPrice: costPrice, // Giá gốc (chưa lãi)
+        profitMargin: profitMargin, // Tỷ lệ lãi (0.05 = 5%)
+        profitAmount: profitAmount, // Tiền lãi
+        total: totalWithProfit // Giá bán (đã có lãi)
+      });
+      total += totalWithProfit;
     }
 
     // Water per occupant

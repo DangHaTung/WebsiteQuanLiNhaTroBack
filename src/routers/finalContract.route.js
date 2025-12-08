@@ -10,6 +10,7 @@ import {
   cancelFinalContract,
   extendContract,
   getExpiringSoonContracts,
+  rentAdditionalRoom,
 } from "../controllers/finalContract.controller.js";
 import { finalContractParamsSchema, deleteFileParamsSchema, assignTenantSchema } from "../validations/finalContract.validation.js";
 import { validateParams, validateBody, validatePagination } from "../middleware/validation.middleware.js";
@@ -118,6 +119,14 @@ router.get(
   authenticateToken,
   authorize('ADMIN'),
   asyncHandler(getExpiringSoonContracts)
+);
+
+// Rent additional room - Admin only
+router.post(
+  "/final-contracts/rent-additional-room",
+  authenticateToken,
+  authorize('ADMIN'),
+  asyncHandler(rentAdditionalRoom)
 );
 
 export default router;

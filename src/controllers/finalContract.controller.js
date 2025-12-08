@@ -912,7 +912,7 @@ export const cancelFinalContract = async (req, res) => {
 export const extendContract = async (req, res) => {
   try {
     const { id } = req.params;
-    const { extensionMonths } = req.body;
+    const { extensionMonths, newRentPrice } = req.body;
 
     // Validate
     if (!extensionMonths || extensionMonths <= 0) {
@@ -976,52 +976,100 @@ export const extendContract = async (req, res) => {
     const newEndDate = new Date(currentEndDate);
     newEndDate.setMonth(newEndDate.getMonth() + parseInt(extensionMonths));
 
-    // Lưu endDate cũ để log
+    // Lưu endDate cũ và giá thuê cũ để log
     const oldEndDate = finalContract.endDate;
+    const oldRentPrice = toNum(finalContract.monthlyRent);
 
     // Cập nhật endDate
     finalContract.endDate = newEndDate;
+
+    // Cập nhật giá thuê mới nếu có
+    if (newRentPrice !== null && newRentPrice !== undefined && newRentPrice > 0) {
+      finalContract.monthlyRent = toDec(newRentPrice);
+      // Cập nhật pricingSnapshot nếu có
+      if (finalContract.pricingSnapshot) {
+        finalContract.pricingSnapshot.monthlyRent = toDec(newRentPrice);
+      }
+    }
 
     // Lưu lịch sử gia hạn vào metadata
     if (!finalContract.metadata) finalContract.metadata = {};
     if (!finalContract.metadata.extensions) finalContract.metadata.extensions = [];
 
-    finalContract.metadata.extensions.push({
+    const extensionRecord = {
       extendedAt: new Date(),
       extendedBy: req.user._id,
       previousEndDate: oldEndDate,
       newEndDate: newEndDate,
       extensionMonths: parseInt(extensionMonths)
-    });
+    };
+
+    // Thêm thông tin giá thuê mới nếu có thay đổi
+    if (newRentPrice !== null && newRentPrice !== undefined && newRentPrice > 0 && newRentPrice !== oldRentPrice) {
+      extensionRecord.previousRentPrice = oldRentPrice;
+      extensionRecord.newRentPrice = newRentPrice;
+    }
+
+    finalContract.metadata.extensions.push(extensionRecord);
 
     await finalContract.save();
 
     // Cập nhật Contract gốc (nếu có)
     if (finalContract.originContractId) {
       try {
-        await Contract.findByIdAndUpdate(finalContract.originContractId, {
-          endDate: newEndDate
-        });
-        console.log(`✅ Updated origin Contract ${finalContract.originContractId} endDate to ${newEndDate}`);
+        const updateData = { endDate: newEndDate };
+        // Cập nhật giá thuê nếu có thay đổi
+        if (newRentPrice !== null && newRentPrice !== undefined && newRentPrice > 0 && newRentPrice !== oldRentPrice) {
+          updateData.monthlyRent = toDec(newRentPrice);
+        }
+        await Contract.findByIdAndUpdate(finalContract.originContractId, updateData);
+        console.log(`✅ Updated origin Contract ${finalContract.originContractId} endDate to ${newEndDate}${updateData.monthlyRent ? ` and monthlyRent to ${newRentPrice}` : ''}`);
       } catch (err) {
         console.warn("Cannot update origin Contract endDate:", err);
       }
     }
 
-    console.log(`✅ Extended FinalContract ${id}: ${oldEndDate} → ${newEndDate} (+${extensionMonths} months)`);
+    // Cập nhật giá phòng trong Room model nếu có thay đổi giá
+    if (newRentPrice !== null && newRentPrice !== undefined && newRentPrice > 0 && newRentPrice !== oldRentPrice && finalContract.roomId) {
+      try {
+        const Room = (await import("../models/room.model.js")).default;
+        await Room.findByIdAndUpdate(finalContract.roomId, {
+          pricePerMonth: toDec(newRentPrice)
+        });
+        console.log(`✅ Updated Room ${finalContract.roomId} pricePerMonth to ${newRentPrice}`);
+      } catch (err) {
+        console.warn("Cannot update Room pricePerMonth:", err);
+      }
+    }
+
+    const rentPriceChanged = newRentPrice !== null && newRentPrice !== undefined && newRentPrice > 0 && newRentPrice !== oldRentPrice;
+    const logMessage = rentPriceChanged 
+      ? `✅ Extended FinalContract ${id}: ${oldEndDate} → ${newEndDate} (+${extensionMonths} months), Rent: ${oldRentPrice} → ${newRentPrice}`
+      : `✅ Extended FinalContract ${id}: ${oldEndDate} → ${newEndDate} (+${extensionMonths} months)`;
+    
+    console.log(logMessage);
+
+    const extensionData = {
+      previousEndDate: oldEndDate,
+      newEndDate: newEndDate,
+      extensionMonths: parseInt(extensionMonths),
+      extendedAt: new Date(),
+      extendedBy: req.user.email || req.user._id
+    };
+
+    if (rentPriceChanged) {
+      extensionData.previousRentPrice = oldRentPrice;
+      extensionData.newRentPrice = newRentPrice;
+    }
 
     return res.status(200).json({
       success: true,
-      message: `Gia hạn hợp đồng thành công thêm ${extensionMonths} tháng`,
+      message: rentPriceChanged 
+        ? `Gia hạn hợp đồng thành công thêm ${extensionMonths} tháng và cập nhật giá thuê mới ${newRentPrice.toLocaleString('vi-VN')} VNĐ/tháng`
+        : `Gia hạn hợp đồng thành công thêm ${extensionMonths} tháng`,
       data: {
         finalContract: formatFinalContract(finalContract),
-        extension: {
-          previousEndDate: oldEndDate,
-          newEndDate: newEndDate,
-          extensionMonths: parseInt(extensionMonths),
-          extendedAt: new Date(),
-          extendedBy: req.user.email || req.user._id
-        }
+        extension: extensionData
       }
     });
   } catch (error) {
@@ -1082,6 +1130,175 @@ export const getExpiringSoonContracts = async (req, res) => {
   }
 };
 
+// Rent Additional Room - Thuê thêm phòng cho tenant hiện tại
+// POST /api/final-contracts/rent-additional-room
+export const rentAdditionalRoom = async (req, res) => {
+  try {
+    const { tenantId, roomId, startDate, endDate, depositAmount } = req.body;
+
+    // Validate input
+    if (!tenantId || !roomId || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "tenantId, roomId, startDate, and endDate are required"
+      });
+    }
+
+    // Kiểm tra tenant có tồn tại không
+    const User = (await import("../models/user.model.js")).default;
+    const tenant = await User.findById(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: "Tenant not found" });
+    }
+
+    // Kiểm tra tenant đã có ít nhất 1 hợp đồng SIGNED chưa
+    const existingContract = await FinalContract.findOne({
+      tenantId: tenantId,
+      status: "SIGNED"
+    });
+
+    if (!existingContract) {
+      return res.status(400).json({
+        success: false,
+        message: "Tenant chưa có hợp đồng nào được ký. Vui lòng tạo hợp đồng đầu tiên qua quy trình thông thường."
+      });
+    }
+
+    // Kiểm tra phòng có tồn tại và trống không
+    const Room = (await import("../models/room.model.js")).default;
+    const room = await Room.findById(roomId);
+    if (!room) {
+      return res.status(404).json({ success: false, message: "Room not found" });
+    }
+
+    if (room.status !== "AVAILABLE") {
+      return res.status(400).json({
+        success: false,
+        message: `Phòng ${room.roomNumber} không còn trống (status: ${room.status})`
+      });
+    }
+
+    // Tạo Contract mới
+    const contract = await Contract.create({
+      tenantId: tenantId,
+      roomId: roomId,
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      deposit: toDec(depositAmount || room.pricePerMonth), // Mặc định cọc = 1 tháng tiền phòng
+      monthlyRent: room.pricePerMonth,
+      pricingSnapshot: {
+        roomNumber: room.roomNumber,
+        monthlyRent: room.pricePerMonth,
+        deposit: toDec(depositAmount || room.pricePerMonth),
+      },
+      status: "ACTIVE",
+      isAdditionalRoom: true, // Đánh dấu là phòng thuê thêm
+    });
+
+    // Tạo FinalContract
+    const finalContract = await FinalContract.create({
+      tenantId: tenantId,
+      roomId: roomId,
+      originContractId: contract._id,
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      deposit: toDec(depositAmount || room.pricePerMonth),
+      monthlyRent: room.pricePerMonth,
+      pricingSnapshot: {
+        roomNumber: room.roomNumber,
+        monthlyRent: room.pricePerMonth,
+        deposit: toDec(depositAmount || room.pricePerMonth),
+      },
+      terms: `Hợp đồng thuê thêm phòng ${room.roomNumber} cho khách hàng ${tenant.fullName}. Thời hạn: ${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}.`,
+      status: "DRAFT",
+    });
+
+    // Tạo Bill CONTRACT (Tiền thuê tháng đầu + Tiền cọc)
+    const monthlyRentNum = toNum(room.pricePerMonth);
+    const depositNum = depositAmount || monthlyRentNum;
+    const totalAmount = monthlyRentNum + depositNum;
+
+    const bill = await Bill.create({
+      contractId: contract._id,
+      finalContractId: finalContract._id,
+      billingDate: new Date(),
+      billType: "CONTRACT",
+      status: "UNPAID",
+      lineItems: [
+        {
+          item: `Tiền thuê tháng đầu - Phòng ${room.roomNumber}`,
+          quantity: 1,
+          unitPrice: room.pricePerMonth,
+          lineTotal: room.pricePerMonth
+        },
+        {
+          item: `Tiền cọc - Phòng ${room.roomNumber}`,
+          quantity: 1,
+          unitPrice: toDec(depositNum),
+          lineTotal: toDec(depositNum)
+        },
+      ],
+      amountDue: toDec(totalAmount),
+      amountPaid: toDec(0),
+      note: `Hợp đồng thuê thêm phòng ${room.roomNumber} cho ${tenant.fullName}`,
+    });
+
+    // Tạo Checkin record
+    const Checkin = (await import("../models/checkin.model.js")).default;
+    
+    // Tính số tháng thuê
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const durationMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+    
+    await Checkin.create({
+      contractId: contract._id,
+      finalContractId: finalContract._id,
+      roomId: roomId,
+      staffId: req.user._id, // Admin đang tạo
+      durationMonths: durationMonths,
+      status: "CREATED",
+      checkinDate: new Date(startDate),
+    });
+
+    console.log(`✅ Created additional room contract: FinalContract ${finalContract._id}, Bill ${bill._id}`);
+
+    // Populate data
+    const populated = await FinalContract.findById(finalContract._id)
+      .populate("tenantId", "fullName email phone role")
+      .populate("roomId", "roomNumber pricePerMonth");
+
+    // 📝 Log
+    await logService.logCreate({
+      entity: 'FINALCONTRACT',
+      entityId: finalContract._id,
+      actorId: req.user?._id,
+      data: {
+        roomId: room.roomNumber,
+        tenantId: tenantId,
+        isAdditionalRoom: true,
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: `Tạo hợp đồng thuê thêm phòng ${room.roomNumber} thành công`,
+      data: {
+        finalContract: formatFinalContract(populated),
+        contract: contract,
+        bill: bill,
+      },
+    });
+  } catch (error) {
+    console.error("rentAdditionalRoom error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi tạo hợp đồng thuê thêm phòng",
+      error: error.message
+    });
+  }
+};
+
 export default {
   createFromContract,
   getFinalContractById,
@@ -1098,4 +1315,5 @@ export default {
   cancelFinalContract,
   extendContract,
   getExpiringSoonContracts,
+  rentAdditionalRoom,
 };
