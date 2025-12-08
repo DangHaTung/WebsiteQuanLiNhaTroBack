@@ -25,6 +25,7 @@ const formatRoom = (room) => {
     areaM2: obj.areaM2,
     floor: obj.floor,
     status: obj.status,
+    initialElectricReading: obj.initialElectricReading || 0,
     image: obj.coverImageUrl || (obj.images?.[0]?.url || ""),
     images: Array.isArray(obj.images) ? obj.images.map(i => i.url || "") : [],
     createdAt: obj.createdAt,
@@ -402,6 +403,8 @@ export const getRoomById = async (req, res) => {
  */
 export const createRoom = async (req, res) => {
     try {
+        console.log("📥 [Backend] Received req.body:", req.body);
+        
         const {
             roomNumber,
             type,
@@ -410,7 +413,10 @@ export const createRoom = async (req, res) => {
             floor,
             status,
             currentContractSummary,
+            initialElectricReading,
         } = req.body;
+
+        console.log("📥 [Backend] initialElectricReading:", initialElectricReading, typeof initialElectricReading);
 
         if (!roomNumber || !pricePerMonth) {
             return res.status(400).json({ 
@@ -463,6 +469,10 @@ export const createRoom = async (req, res) => {
             } catch {}
         }
 
+        // Parse initialElectricReading to number
+        const electricReading = initialElectricReading ? parseFloat(initialElectricReading) : 0;
+        console.log("📥 [Backend] Parsed electricReading:", electricReading);
+
         const room = new Room({
             roomNumber,
             type,
@@ -471,11 +481,14 @@ export const createRoom = async (req, res) => {
             floor,
             status,
             currentContractSummary,
+            initialElectricReading: electricReading,
             images: [...bodyImages, ...uploadedImages],
             coverImageUrl: (bodyImages?.[0]?.url) || (uploadedImages?.[0]?.url),
         });
 
+        console.log("📥 [Backend] Room object before save:", { initialElectricReading: room.initialElectricReading });
         const saved = await room.save();
+        console.log("✅ [Backend] Saved room:", { initialElectricReading: saved.initialElectricReading });
 
         // 📝 Log room creation
         await logService.logCreate({
@@ -487,6 +500,7 @@ export const createRoom = async (req, res) => {
                 type: saved.type,
                 pricePerMonth: convertDecimal128(saved.pricePerMonth),
                 status: saved.status,
+                initialElectricReading: saved.initialElectricReading,
             },
         });
 
@@ -510,6 +524,8 @@ export const createRoom = async (req, res) => {
 export const updateRoom = async (req, res) => {
     try {
         const { id } = req.params;
+        console.log("📥 [Backend UPDATE] Received req.body:", req.body);
+        
         if (!mongoose.isValidObjectId(id))
             return res.status(400).json({ 
                 message: "ID phòng không hợp lệ",
@@ -532,6 +548,12 @@ export const updateRoom = async (req, res) => {
 
         const update = { ...req.body };
         delete update._id;
+
+        // Parse initialElectricReading to number if present
+        if (update.initialElectricReading !== undefined) {
+            update.initialElectricReading = parseFloat(update.initialElectricReading) || 0;
+            console.log("📥 [Backend UPDATE] Parsed initialElectricReading:", update.initialElectricReading);
+        }
 
         // Xử lý ảnh upload mới
         let uploadedImages = [];
@@ -587,11 +609,13 @@ export const updateRoom = async (req, res) => {
         }
 
         const oldRoom = await Room.findById(id);
+        console.log("📥 [Backend UPDATE] Update object:", update);
         const updated = await Room.findByIdAndUpdate(id, update, { new: true });
         if (!updated) return res.status(404).json({ 
             message: "Không tìm thấy phòng",
             success: false 
         });
+        console.log("✅ [Backend UPDATE] Updated room:", { initialElectricReading: updated.initialElectricReading });
 
         // 📝 Log room update
         await logService.logUpdate({
@@ -602,11 +626,13 @@ export const updateRoom = async (req, res) => {
                 roomNumber: oldRoom?.roomNumber,
                 status: oldRoom?.status,
                 pricePerMonth: convertDecimal128(oldRoom?.pricePerMonth),
+                initialElectricReading: oldRoom?.initialElectricReading,
             },
             after: {
                 roomNumber: updated.roomNumber,
                 status: updated.status,
                 pricePerMonth: convertDecimal128(updated.pricePerMonth),
+                initialElectricReading: updated.initialElectricReading,
             },
         });
 

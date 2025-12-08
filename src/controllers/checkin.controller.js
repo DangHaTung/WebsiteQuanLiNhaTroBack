@@ -137,6 +137,10 @@ export const createCashCheckin = async (req, res) => {
     }
 
     // 1) Ghi nhận bản ghi Checkin trước — nguồn dữ liệu gốc cho thông tin khách
+    const parsedElectricReading = initialElectricReading !== undefined && initialElectricReading !== null && initialElectricReading !== "" 
+      ? Number(initialElectricReading) 
+      : undefined;
+    
     const checkinRecord = await Checkin.create({
       tenantId: tenantId || undefined,
       staffId: user._id,
@@ -151,14 +155,20 @@ export const createCashCheckin = async (req, res) => {
         phone: tenantInfo?.phone || "",
         address: (address && address.trim()) || (tenantInfo?.address && tenantInfo.address.trim()) || "",
       },
-      initialElectricReading: initialElectricReading !== undefined && initialElectricReading !== null && initialElectricReading !== "" 
-        ? Number(initialElectricReading) 
-        : undefined,
+      initialElectricReading: parsedElectricReading,
       vehicles: parsedVehicles,
       cccdImages,
       notes,
       status: "CREATED",
     });
+    
+    // Cập nhật initialElectricReading của Room nếu có thay đổi
+    if (parsedElectricReading !== undefined && parsedElectricReading !== room.initialElectricReading) {
+      const oldReading = room.initialElectricReading || 0;
+      room.initialElectricReading = parsedElectricReading;
+      await room.save();
+      console.log(`✅ Updated room ${room._id} initialElectricReading: ${oldReading} → ${parsedElectricReading} (from checkin)`);
+    }
 
     // 2) Tạo hợp đồng tạm thời (Contract)
     const contractPayload = {
@@ -359,6 +369,10 @@ export const createOnlineCheckin = async (req, res) => {
     }
 
     // Tạo bản ghi Checkin
+    const parsedElectricReading = initialElectricReading !== undefined && initialElectricReading !== null && initialElectricReading !== "" 
+      ? Number(initialElectricReading) 
+      : undefined;
+    
     const checkinRecord = await Checkin.create({
       tenantId: tenantId || undefined,
       staffId: user._id,
@@ -373,14 +387,20 @@ export const createOnlineCheckin = async (req, res) => {
         phone: tenantInfo?.phone || "",
         address: (address && address.trim()) || (tenantInfo?.address && tenantInfo.address.trim()) || "",
       },
-      initialElectricReading: initialElectricReading !== undefined && initialElectricReading !== null && initialElectricReading !== "" 
-        ? Number(initialElectricReading) 
-        : undefined,
+      initialElectricReading: parsedElectricReading,
       vehicles: parsedVehicles,
       cccdImages,
       notes,
       status: "CREATED",
     });
+    
+    // Cập nhật initialElectricReading của Room nếu có thay đổi
+    if (parsedElectricReading !== undefined && parsedElectricReading !== room.initialElectricReading) {
+      const oldReading = room.initialElectricReading || 0;
+      room.initialElectricReading = parsedElectricReading;
+      await room.save();
+      console.log(`✅ Updated room ${room._id} initialElectricReading: ${oldReading} → ${parsedElectricReading} (from online checkin)`);
+    }
 
     const contractPayload = {
       roomId,

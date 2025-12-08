@@ -128,6 +128,17 @@ export const createRoomSchema = Joi.object({
     .messages({
       'object.base': 'CurrentContractSummary phải là object',
     }),
+
+  // Số điện cũ (ban đầu) của phòng - dùng cho phiếu thu cọc
+  initialElectricReading: Joi.number()
+    .min(0)
+    .precision(2)
+    .optional()
+    .default(0)
+    .messages({
+      'number.base': 'InitialElectricReading phải là số',
+      'number.min': 'InitialElectricReading phải lớn hơn hoặc bằng 0',
+    }),
 });
 
 // Schema cho cập nhật room
@@ -241,6 +252,16 @@ export const updateRoomSchema = Joi.object({
     .optional()
     .messages({
       'object.base': 'CurrentContractSummary phải là object',
+    }),
+
+  // Số điện cũ (ban đầu) của phòng - dùng cho phiếu thu cọc
+  initialElectricReading: Joi.number()
+    .min(0)
+    .precision(2)
+    .optional()
+    .messages({
+      'number.base': 'InitialElectricReading phải là số',
+      'number.min': 'InitialElectricReading phải lớn hơn hoặc bằng 0',
     }),
 })
   .min(1)

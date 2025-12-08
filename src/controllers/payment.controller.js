@@ -177,6 +177,54 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
                     }
                 }
             }
+            
+            // Cập nhật initialElectricReading của Room khi thanh toán MONTHLY bill
+            if (bill.billType === "MONTHLY" && bill.status === "PAID") {
+                const Room = (await import("../models/room.model.js")).default;
+                
+                // Tìm line item điện trong bill
+                const electricItem = bill.lineItems?.find(item => 
+                    item.item?.toLowerCase().includes('điện') || 
+                    item.item?.toLowerCase().includes('electric')
+                );
+                
+                if (electricItem && electricItem.metadata?.newReading !== undefined) {
+                    // Lấy roomId từ bill (có thể qua contractId hoặc finalContractId)
+                    let roomId = null;
+                    
+                    if (bill.contractId) {
+                        const Contract = (await import("../models/contract.model.js")).default;
+                        const contract = await Contract.findById(bill.contractId).select('roomId').session(session);
+                        roomId = contract?.roomId;
+                    } else if (bill.finalContractId) {
+                        const FinalContract = (await import("../models/finalContract.model.js")).default;
+                        const finalContract = await FinalContract.findById(bill.finalContractId).select('roomId').session(session);
+                        roomId = finalContract?.roomId;
+                    }
+                    
+                    if (roomId) {
+                        const room = await Room.findById(roomId).session(session);
+                        if (room) {
+                            const oldReading = room.initialElectricReading || 0;
+                            const newReading = Number(electricItem.metadata.newReading);
+                            
+                            room.initialElectricReading = newReading;
+                            await room.save({ session });
+                            
+                            console.log(`✅ Updated room ${room._id} initialElectricReading: ${oldReading} → ${newReading}`);
+                            
+                            // 📝 Log electric reading update
+                            await logService.logUpdate({
+                                entity: 'ROOM',
+                                entityId: room._id,
+                                actorId: null,
+                                before: { initialElectricReading: oldReading },
+                                after: { initialElectricReading: newReading },
+                            });
+                        }
+                    }
+                }
+            }
         });
     } catch (err) {
         // fallback nếu MongoDB không hỗ trợ transaction
@@ -335,6 +383,54 @@ export async function applyPaymentToBill(payment, rawParams = {}) {
                     room.occupantCount = occupantCount;
                     await room.save();
                     console.log(`✅ [FALLBACK] Updated room ${room._id} status to OCCUPIED, occupantCount: ${occupantCount}`);
+                }
+            }
+        }
+        
+        // Cập nhật initialElectricReading của Room khi thanh toán MONTHLY bill (fallback mode)
+        if (bill.billType === "MONTHLY" && bill.status === "PAID") {
+            const Room = (await import("../models/room.model.js")).default;
+            
+            // Tìm line item điện trong bill
+            const electricItem = bill.lineItems?.find(item => 
+                item.item?.toLowerCase().includes('điện') || 
+                item.item?.toLowerCase().includes('electric')
+            );
+            
+            if (electricItem && electricItem.metadata?.newReading !== undefined) {
+                // Lấy roomId từ bill (có thể qua contractId hoặc finalContractId)
+                let roomId = null;
+                
+                if (bill.contractId) {
+                    const Contract = (await import("../models/contract.model.js")).default;
+                    const contract = await Contract.findById(bill.contractId).select('roomId');
+                    roomId = contract?.roomId;
+                } else if (bill.finalContractId) {
+                    const FinalContract = (await import("../models/finalContract.model.js")).default;
+                    const finalContract = await FinalContract.findById(bill.finalContractId).select('roomId');
+                    roomId = finalContract?.roomId;
+                }
+                
+                if (roomId) {
+                    const room = await Room.findById(roomId);
+                    if (room) {
+                        const oldReading = room.initialElectricReading || 0;
+                        const newReading = Number(electricItem.metadata.newReading);
+                        
+                        room.initialElectricReading = newReading;
+                        await room.save();
+                        
+                        console.log(`✅ [FALLBACK] Updated room ${room._id} initialElectricReading: ${oldReading} → ${newReading}`);
+                        
+                        // 📝 Log electric reading update
+                        await logService.logUpdate({
+                            entity: 'ROOM',
+                            entityId: room._id,
+                            actorId: null,
+                            before: { initialElectricReading: oldReading },
+                            after: { initialElectricReading: newReading },
+                        });
+                    }
                 }
             }
         }

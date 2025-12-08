@@ -75,6 +75,12 @@ const roomSchema = new Schema(
             default: "uncleaned",
             index: true,
         },
+        // Số điện cũ (ban đầu) của phòng - dùng cho phiếu thu cọc
+        initialElectricReading: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
     },
     {
         timestamps: { createdAt: true, updatedAt: false },
