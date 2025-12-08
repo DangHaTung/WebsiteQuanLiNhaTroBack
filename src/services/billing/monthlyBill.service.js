@@ -61,14 +61,15 @@ export async function calculateRoomMonthlyFees({
     }
   }
 
-  // 2. Tiền điện (theo bậc thang)
+  // 2. Tiền điện (theo bậc thang + lãi 5%)
   if (roomFee.appliedTypes.includes("electricity") && electricityKwh > 0) {
     const activeElec = await UtilityFee.findOne({ type: "electricity", isActive: true });
     const tiers = activeElec?.electricityTiers?.length ? activeElec.electricityTiers : DEFAULT_ELECTRICITY_TIERS;
     const vatPercent = typeof activeElec?.vatPercent === "number" ? activeElec.vatPercent : 8;
+    const profitMargin = 0.05; // Lãi 5% trên tiền điện
     
     // Debug logging
-    console.log(`[calculateRoomMonthlyFees] Electricity calculation: kwh=${electricityKwh}, tiers count=${tiers?.length || 0}, vatPercent=${vatPercent}`);
+    console.log(`[calculateRoomMonthlyFees] Electricity calculation: kwh=${electricityKwh}, tiers count=${tiers?.length || 0}, vatPercent=${vatPercent}, profitMargin=${profitMargin * 100}%`);
     if (tiers && tiers.length > 0) {
       console.log(`[calculateRoomMonthlyFees] Tiers from DB:`, JSON.stringify(tiers, null, 2));
     } else {
@@ -77,7 +78,11 @@ export async function calculateRoomMonthlyFees({
     
     const elecResult = calculateElectricityCost(electricityKwh, tiers, vatPercent);
     
-    console.log(`[calculateRoomMonthlyFees] Electricity result: subtotal=${elecResult.subtotal}, vat=${elecResult.vat}, total=${elecResult.total}`);
+    // Thêm lãi 5% vào tổng tiền điện
+    const electricityWithProfit = elecResult.total * (1 + profitMargin);
+    const profitAmount = elecResult.total * profitMargin;
+    
+    console.log(`[calculateRoomMonthlyFees] Electricity result: subtotal=${elecResult.subtotal}, vat=${elecResult.vat}, total=${elecResult.total}, profit=${profitAmount}, finalTotal=${electricityWithProfit}`);
     if (elecResult.items && elecResult.items.length > 0) {
       console.log(`[calculateRoomMonthlyFees] Electricity items:`, JSON.stringify(elecResult.items, null, 2));
     }
@@ -85,18 +90,21 @@ export async function calculateRoomMonthlyFees({
     lineItems.push({
       item: `Tiền điện (${electricityKwh} kWh)`,
       quantity: electricityKwh,
-      unitPrice: toDec(elecResult.subtotal / electricityKwh), // Giá trung bình
-      lineTotal: toDec(elecResult.total),
+      unitPrice: toDec(electricityWithProfit / electricityKwh), // Giá trung bình đã bao gồm lãi
+      lineTotal: toDec(electricityWithProfit),
     });
     
     breakdown.electricity = {
       kwh: electricityKwh,
       subtotal: elecResult.subtotal,
       vat: elecResult.vat,
-      total: elecResult.total,
+      costPrice: elecResult.total, // Giá gốc (chưa có lãi)
+      profitMargin: profitMargin,
+      profitAmount: profitAmount,
+      total: electricityWithProfit, // Giá bán (đã có lãi 5%)
       tiers: elecResult.items,
     };
-    totalAmount += elecResult.total;
+    totalAmount += electricityWithProfit;
   }
 
   // 3. Tiền nước (tính theo số người)
@@ -398,6 +406,9 @@ export async function createMonthlyBillForRoom({
     amountPaid: toDec(0),
     payments: [],
     note: note || generateBillNote(billingMonth, room.roomNumber),
+    metadata: {
+      breakdown: feeCalculation.breakdown, // Lưu breakdown để ADMIN xem lãi
+    },
   });
 
   // Helper function để tạo ghi chú hóa đơn với tháng trước
