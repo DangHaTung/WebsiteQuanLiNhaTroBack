@@ -213,22 +213,51 @@ export const calculateRoomFees = async (req, res) => {
       total += amount;
     }
 
-    // Internet flat
+    // Internet flat (với lãi 50%)
     if (rf.appliedTypes.includes("internet")) {
       const active = await UtilityFee.findOne({ type: "internet", isActive: true });
-      const amount = active?.baseRate || 0;
-      breakdown.push({ type: "internet", baseRate: amount, total: amount });
-      total += amount;
+      const baseRate = active?.baseRate || 0;
+      const profitMargin = 0.5; // Lãi 50%
+      
+      if (baseRate > 0) {
+        const costPrice = baseRate / (1 + profitMargin); // Chi phí gốc = giá bán / (1 + lãi)
+        const profitAmount = baseRate - costPrice; // Tiền lãi
+        
+        breakdown.push({ 
+          type: "internet", 
+          baseRate: baseRate,
+          costPrice: costPrice, // Chi phí gốc
+          profitMargin: profitMargin, // Tỷ lệ lãi (0.5 = 50%)
+          profitAmount: profitAmount, // Tiền lãi
+          total: baseRate 
+        });
+        total += baseRate;
+      }
     }
 
-    // Cleaning per occupant
+    // Cleaning per occupant (với lãi 33.33%)
     if (rf.appliedTypes.includes("cleaning")) {
       const active = await UtilityFee.findOne({ type: "cleaning", isActive: true });
       const rate = active?.baseRate || 0;
       const count = Number(occupantCount) || 0;
-      const amount = rate * count;
-      breakdown.push({ type: "cleaning", baseRate: rate, occupantCount: count, total: amount });
-      total += amount;
+      const profitMargin = 1/3; // Lãi 33.33%
+      
+      if (rate > 0 && count > 0) {
+        const amount = rate * count;
+        const costPrice = amount / (1 + profitMargin); // Chi phí gốc = giá bán / (1 + lãi)
+        const profitAmount = amount - costPrice; // Tiền lãi
+        
+        breakdown.push({ 
+          type: "cleaning", 
+          baseRate: rate, 
+          occupantCount: count,
+          costPrice: costPrice, // Chi phí gốc
+          profitMargin: profitMargin, // Tỷ lệ lãi (1/3 = 33.33%)
+          profitAmount: profitAmount, // Tiền lãi
+          total: amount 
+        });
+        total += amount;
+      }
     }
 
     // Parking per vehicle - hỗ trợ cả vehicles array (mới) và vehicleCount (cũ)
