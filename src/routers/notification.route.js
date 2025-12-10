@@ -244,19 +244,16 @@ router.post('/upcoming-bill/scan', authenticateToken, authorize('ADMIN'), async 
     const { daysBeforeBilling } = req.body;
     const billingDay = parseInt(process.env.MONTHLY_BILLING_DAY || '5');
     
-    // Tính ngày tạo hóa đơn
-    let billingDate;
-    if (daysBeforeBilling && daysBeforeBilling > 5) {
-      // Nếu còn nhiều hơn 5 ngày, có thể là tháng sau
-      billingDate = moment().add(1, 'month').date(billingDay).startOf('day').toDate();
-    } else {
-      // Ngược lại là tháng này
-      billingDate = moment().date(billingDay).startOf('day').toDate();
-    }
-    
-    // Tính số ngày còn lại nếu không được cung cấp
+    // Tính ngày tạo hóa đơn: nếu hôm nay đã qua ngày billingDay tháng này => chọn ngày billingDay tháng sau
     const today = moment().startOf('day');
-    const calculatedDays = daysBeforeBilling || moment(billingDate).diff(today, 'days');
+    let billingDateMoment = moment().date(billingDay).startOf('day');
+    if (today.isAfter(billingDateMoment)) {
+      billingDateMoment = billingDateMoment.add(1, 'month');
+    }
+    const billingDate = billingDateMoment.toDate();
+    
+    // Số ngày còn lại đến ngày tạo hóa đơn
+    const calculatedDays = daysBeforeBilling ?? billingDateMoment.diff(today, 'days');
     
     const results = await scanAndSendUpcomingBillNotifications(calculatedDays, billingDate);
     

@@ -474,6 +474,28 @@ export const createBill = async (req, res) => {
     const bill = new Bill(req.body);
     await bill.save();
 
+    // Tạo thông báo realtime cho tenant: Hóa đơn mới được phát hành
+    try {
+      const populatedBill = await Bill.findById(bill._id)
+        .populate({
+          path: 'contractId',
+          populate: [
+            { path: 'tenantId', select: 'fullName email' },
+            { path: 'roomId', select: 'roomNumber' },
+          ],
+        });
+      const notifyPayload = {
+        ...populatedBill.toObject(),
+        tenantId:
+          populatedBill.tenantId ||
+          (populatedBill.contractId?.tenantId?._id || populatedBill.contractId?.tenantId),
+      };
+      const notificationService = (await import('../services/notification/notification.service.js')).default;
+      await notificationService.notifyBillCreated(notifyPayload);
+    } catch (notifErr) {
+      console.error('❌ Error sending BILL_CREATED notification:', notifErr.message);
+    }
+
     // Populate và format bill
     const populatedBill = await Bill.findById(bill._id)
       .populate("contractId")
@@ -1119,6 +1141,26 @@ export const publishDraftBill = async (req, res) => {
         .json({ success: false, message: "Không tìm thấy thông tin phòng" });
     }
 
+    // Validation: Chặn phát hành nếu còn hóa đơn tháng trước chưa thanh toán
+    // Tiêu chí: billType MONTHLY, status thuộc UNPAID | PARTIALLY_PAID | PENDING_CASH_CONFIRM,
+    // cùng contractId, và billingDate trước billingDate của bill nháp hiện tại
+    const previousUnpaid = await Bill.findOne({
+      contractId: bill.contractId._id,
+      billType: "MONTHLY",
+      status: { $in: ["UNPAID", "PARTIALLY_PAID", "PENDING_CASH_CONFIRM"] },
+      billingDate: { $lt: bill.billingDate },
+    }).select("_id billingDate status amountDue");
+
+    if (previousUnpaid) {
+      const prevMonth = new Date(previousUnpaid.billingDate);
+      const msg = `Không thể phát hành hóa đơn mới vì còn hóa đơn tháng ${prevMonth.getMonth() + 1}/${prevMonth.getFullYear()} chưa thanh toán (trạng thái: ${previousUnpaid.status}).`;
+      return res.status(400).json({
+        success: false,
+        message: msg,
+        data: { previousBillId: previousUnpaid._id },
+      });
+    }
+
     // Tính toán lại với số điện mới
     const { calculateRoomMonthlyFees } = await import(
       "../services/billing/monthlyBill.service.js"
@@ -1244,6 +1286,22 @@ export const publishBatchDraftBills = async (req, res) => {
           continue;
         }
 
+        // Validation: Chặn phát hành nếu còn hóa đơn tháng trước chưa thanh toán
+        const previousUnpaid = await Bill.findOne({
+          contractId: bill.contractId._id,
+          billType: "MONTHLY",
+          status: { $in: ["UNPAID", "PARTIALLY_PAID", "PENDING_CASH_CONFIRM"] },
+          billingDate: { $lt: bill.billingDate },
+        }).select("_id billingDate status amountDue");
+        if (previousUnpaid) {
+          const prevMonth = new Date(previousUnpaid.billingDate);
+          results.failed.push({
+            billId,
+            error: `Còn hóa đơn tháng ${prevMonth.getMonth() + 1}/${prevMonth.getFullYear()} chưa thanh toán (trạng thái: ${previousUnpaid.status})`,
+          });
+          continue;
+        }
+
         const contract = await Contract.findById(bill.contractId._id).populate(
           "roomId"
         );
@@ -1287,6 +1345,28 @@ export const publishBatchDraftBills = async (req, res) => {
         
         bill.updatedAt = new Date();
         await bill.save();
+
+        // Gửi thông báo realtime cho từng bill đã publish
+        try {
+          const populatedBill = await Bill.findById(bill._id)
+            .populate({
+              path: 'contractId',
+              populate: [
+                { path: 'tenantId', select: 'fullName email' },
+                { path: 'roomId', select: 'roomNumber' },
+              ],
+            });
+          const notifyPayload = {
+            ...populatedBill.toObject(),
+            tenantId:
+              populatedBill.tenantId ||
+              (populatedBill.contractId?.tenantId?._id || populatedBill.contractId?.tenantId),
+          };
+          const notificationService = (await import('../services/notification/notification.service.js')).default;
+          await notificationService.notifyBillCreated(notifyPayload);
+        } catch (notifErr) {
+          console.error('❌ Error sending BILL_CREATED notification (batch):', notifErr.message);
+        }
 
         results.success.push({
           billId: bill._id,
@@ -1571,6 +1651,12 @@ export const requestCashPayment = async (req, res) => {
         format: req.file.format,
         bytes: req.file.size,
       };
+      // Đảm bảo Mongoose lưu thay đổi cho trường Mixed
+      try {
+        bill.markModified && bill.markModified('metadata');
+      } catch (e) {
+        // no-op
+      }
     }
 
     await bill.save();

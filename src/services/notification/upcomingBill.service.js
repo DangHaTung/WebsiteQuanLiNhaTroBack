@@ -3,6 +3,7 @@ import moment from 'moment';
 import Contract from '../../models/contract.model.js';
 import { emitToUser, emitToAdmins } from '../socket/socket.service.js';
 import { sendEmailNotification } from '../email/notification.service.js';
+import notificationService from './notification.service.js';
 
 const toNum = (d) => (d === null || d === undefined ? 0 : parseFloat(d.toString()));
 
@@ -57,6 +58,32 @@ export async function sendUpcomingBillNotification(contract, daysUntilBilling, b
     // Gửi email nếu tenant có email
     if (tenant.email) {
       await sendUpcomingBillEmail(tenant, room, contract, daysUntilBilling, billingDate, monthlyRent);
+    }
+
+    // Lưu vào hệ thống Notification + phát new-notification để client hiển thị trong bell/list
+    try {
+      await notificationService.createNotification({
+        userId: tenant._id,
+        type: 'UPCOMING_BILL',
+        title: daysUntilBilling === 0
+          ? `Hóa đơn tháng ${billingMonth} sẽ được tạo hôm nay`
+          : `Hóa đơn tháng ${billingMonth} sắp được tạo`,
+        message: daysUntilBilling === 0
+          ? `Hôm nay sẽ tạo hóa đơn tháng ${billingMonth} cho phòng ${room.roomNumber}.`
+          : `Hóa đơn tháng ${billingMonth} sẽ được tạo vào ngày ${billingDateFormatted} (còn ${daysUntilBilling} ngày).`,
+        relatedEntity: 'CONTRACT',
+        relatedEntityId: contract._id,
+        metadata: {
+          roomNumber: room.roomNumber,
+          billingDate,
+          daysUntilBilling,
+          estimatedRent: monthlyRent,
+        },
+        priority: daysUntilBilling <= 2 ? 'HIGH' : 'MEDIUM',
+        actionUrl: '/invoices',
+      });
+    } catch (err) {
+      console.error('❌ Lỗi khi tạo Notification UPCOMING_BILL:', err.message);
     }
 
     return notification;
