@@ -66,14 +66,15 @@ export function initializeSocketIO(httpServer) {
     }
     userSockets.get(socket.userId).add(socket.id);
 
-    // Join room theo role
+    // Join room theo role (luôn join room riêng theo user để đảm bảo emitToUser hoạt động cho mọi role)
+    socket.join(`user-${socket.userId}`);
     if (socket.userRole === 'ADMIN') {
       socket.join('admin-room');
       console.log(`👑 Admin joined admin-room: ${socket.userFullName}`);
-    } else if (socket.userRole === 'TENANT') {
+    } else {
+      // Treat USER/TENANT/STAFF as tenant-room subscriber for broadcast to tenants
       socket.join('tenant-room');
-      socket.join(`user-${socket.userId}`); // Room riêng cho từng tenant
-      console.log(`🏠 Tenant joined rooms: ${socket.userFullName}`);
+      console.log(`🏠 User joined tenant-room: ${socket.userFullName} (${socket.userRole})`);
     }
 
     // Gửi thông báo chào mừng

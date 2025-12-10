@@ -16,6 +16,7 @@ const notificationSchema = new mongoose.Schema(
       enum: [
         'BILL_CREATED',        // Tạo hóa đơn mới
         'BILL_DUE_SOON',       // Hóa đơn sắp đến hạn
+        'UPCOMING_BILL',       // Hóa đơn sắp được tạo
         'PAYMENT_SUCCESS',     // Thanh toán thành công
         'PAYMENT_FAILED',      // Thanh toán thất bại
         'CONTRACT_SIGNED',     // Ký hợp đồng

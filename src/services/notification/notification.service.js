@@ -239,6 +239,13 @@ class NotificationService {
    */
   async notifyBillCreated(bill) {
     try {
+      const toNum = (d) => {
+        if (d === null || d === undefined) return 0;
+        if (typeof d === 'number') return d;
+        if (typeof d === 'object' && d.$numberDecimal) return Number(d.$numberDecimal);
+        const n = Number(d);
+        return isNaN(n) ? 0 : n;
+      };
       const billTypeText = {
         MONTHLY: 'hóa đơn hàng tháng',
         CONTRACT: 'hóa đơn hợp đồng',
@@ -246,13 +253,17 @@ class NotificationService {
       };
 
       const typeText = billTypeText[bill.billType] || 'hóa đơn';
+      const amount = toNum(bill.amountDue ?? bill.transfer);
       const amountFormatted = new Intl.NumberFormat('vi-VN', {
         style: 'currency',
         currency: 'VND',
-      }).format(bill.transfer);
+      }).format(amount);
+
+      const userId = bill.tenantId || bill.contractId?.tenantId?._id || bill.contractId?.tenantId;
+      const roomNumber = bill.roomId?.roomNumber || bill.contractId?.roomId?.roomNumber;
 
       return await this.createNotification({
-        userId: bill.tenantId,
+        userId,
         type: 'BILL_CREATED',
         title: `${typeText.charAt(0).toUpperCase() + typeText.slice(1)} mới`,
         message: `Bạn có ${typeText} mới: ${amountFormatted}${bill.month ? ` - Tháng ${bill.month}` : ''}`,
@@ -262,9 +273,9 @@ class NotificationService {
         actionUrl: `/invoices/${bill._id}`,
         metadata: {
           billType: bill.billType,
-          amount: bill.transfer,
+          amount,
           month: bill.month,
-          roomNumber: bill.roomId?.roomNumber,
+          roomNumber,
           dueDate: bill.dueDate,
         },
       });
