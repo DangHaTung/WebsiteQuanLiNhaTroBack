@@ -172,44 +172,51 @@ export const createFromContract = async (req, res) => {
       status: "DRAFT",
     });
 
-    // Create 1 bill CONTRACT gộp: Tiền thuê tháng đầu + Tiền cọc (1 tháng tiền phòng)
-    // Logic mới:
-    // - Tiền thuê tháng đầu: 5tr (chờ thanh toán)
-    // - Tiền cọc 1 tháng tiền phòng: 5tr - 500k (đã cọc giữ phòng) = 4tr5 (chờ thanh toán)
-    // - Tổng phải đóng: 5tr + 4tr5 = 9tr5
+    // Create 1 bill CONTRACT gộp: Tiền thuê tháng đầu (PRORATED) + Tiền cọc (1 tháng tiền phòng)
+    // Logic PRORATED BILLING:
+    // - Tiền thuê tháng đầu: Tính theo tỷ lệ số ngày ở trong tháng
+    //   Ví dụ: Vào 15/4, tháng 4 có 30 ngày, ở 16 ngày → 16/30 × 3.6tr
+    // - Tiền cọc 1 tháng tiền phòng: 3.6tr - 500k (đã cọc giữ phòng) = 3.1tr (chờ thanh toán)
+    // - Tổng phải đóng: (tiền thuê prorated) + 3.1tr
     // 
-    // amountDue = số tiền còn lại phải đóng (9tr5)
-    // amountPaid = số tiền đã đóng (500k từ phiếu thu cọc giữ phòng)
+    // amountDue = số tiền còn lại phải đóng
+    // amountPaid = 0đ (chưa thanh toán hóa đơn CONTRACT này, tiền cọc 500k đã được thanh toán ở hóa đơn RECEIPT)
+    
+    // Tính tiền thuê tháng đầu theo tỷ lệ (prorated)
     const monthlyRentNum = toNum(contract.monthlyRent);
-    const depositRemaining = Math.max(0, monthlyRentNum - receiptBillPaidAmount); // Cọc còn lại phải đóng: 5tr - 500k = 4tr5
-    const totalRemainingAmount = monthlyRentNum + depositRemaining; // Tổng còn lại: 5tr + 4tr5 = 9tr5
+    const startDate = new Date(contract.startDate);
+    const startMonth = startDate.getMonth();
+    const startYear = startDate.getFullYear();
+    
+    // Tính số ngày trong tháng bắt đầu
+    const daysInStartMonth = new Date(startYear, startMonth + 1, 0).getDate();
+    
+    // Tính số ngày ở trong tháng đầu (từ ngày bắt đầu đến cuối tháng)
+    const startDay = startDate.getDate();
+    const daysLivedInFirstMonth = daysInStartMonth - startDay + 1;
+    
+    // Tính tiền thuê prorated cho tháng đầu
+    const proratedRent = (daysLivedInFirstMonth / daysInStartMonth) * monthlyRentNum;
+    
+    console.log(`📊 [PRORATED BILLING] Contract ${contract._id}:`);
+    console.log(`   Start date: ${startDate.toLocaleDateString('vi-VN')}`);
+    console.log(`   Days in month: ${daysInStartMonth}`);
+    console.log(`   Days lived: ${daysLivedInFirstMonth}`);
+    console.log(`   Full rent: ${monthlyRentNum.toLocaleString('vi-VN')} đ`);
+    console.log(`   Prorated rent: ${proratedRent.toLocaleString('vi-VN')} đ (${daysLivedInFirstMonth}/${daysInStartMonth})`);
+    
+    const depositRemaining = Math.max(0, monthlyRentNum - receiptBillPaidAmount); // Cọc còn lại phải đóng: 3.6tr - 500k = 3.1tr
+    const totalRemainingAmount = proratedRent + depositRemaining; // Tổng còn lại: (tiền thuê prorated) + 3.1tr
 
     // Xác định status ban đầu
     // Khi mới tạo: status = UNPAID (chờ thanh toán)
-    // Vì các khoản 2 và 3 chưa thanh toán, chỉ có khoản 1 (cọc giữ phòng) đã thanh toán
+    // amountPaid = 0đ (chưa thanh toán hóa đơn CONTRACT này)
     let initialStatus = "UNPAID";
-    let initialAmountPaid = receiptBillPaidAmount; // 500k
-    if (receiptBillPaidAmount >= totalRemainingAmount) {
-      // Nếu đã đóng đủ tổng (9tr5), thì status = PAID
-      initialStatus = "PAID";
-      initialAmountPaid = totalRemainingAmount;
-    } else if (receiptBillPaidAmount > 0) {
-      // Nếu đã đóng một phần (500k), nhưng vẫn để UNPAID vì các khoản 2 và 3 chưa thanh toán
-      // Chỉ khi thanh toán thêm thì mới chuyển sang PARTIALLY_PAID hoặc PAID
-      initialStatus = "UNPAID";
-    }
+    let initialAmountPaid = 0; // 0đ - chưa thanh toán hóa đơn CONTRACT
 
-    // Copy payments từ receipt bill nếu có
+    // KHÔNG copy payments từ receipt bill vì đó là hóa đơn khác
+    // Hóa đơn CONTRACT là hóa đơn mới, chưa có payment nào
     let initialPayments = [];
-    if (checkin.receiptBillId) {
-      const receiptBill = await Bill.findById(checkin.receiptBillId);
-      if (receiptBill && receiptBill.payments && receiptBill.payments.length > 0) {
-        initialPayments = receiptBill.payments.map(p => ({
-          ...p,
-          note: p.note ? `${p.note} (từ phiếu thu cọc giữ phòng)` : "Từ phiếu thu cọc giữ phòng"
-        }));
-      }
-    }
 
     await Bill.create({
       contractId: contract._id,
@@ -218,14 +225,19 @@ export const createFromContract = async (req, res) => {
       billType: "CONTRACT",
       status: initialStatus,
       lineItems: [
-        { item: "Tiền thuê tháng đầu", quantity: 1, unitPrice: contract.monthlyRent, lineTotal: contract.monthlyRent },
+        { 
+          item: `Tiền thuê tháng đầu (${daysLivedInFirstMonth}/${daysInStartMonth} ngày)`, 
+          quantity: 1, 
+          unitPrice: toDec(proratedRent), 
+          lineTotal: toDec(proratedRent) 
+        },
         { item: "Tiền cọc (1 tháng tiền phòng)", quantity: 1, unitPrice: toDec(depositRemaining), lineTotal: toDec(depositRemaining) },
       ],
-      // amountDue = số tiền còn lại phải đóng (9tr5)
-      amountDue: toDec(totalRemainingAmount), // 9tr5
-      amountPaid: toDec(initialAmountPaid), // 500k
+      // amountDue = số tiền còn lại phải đóng (prorated rent + cọc còn lại)
+      amountDue: toDec(totalRemainingAmount),
+      amountPaid: toDec(initialAmountPaid), // 0đ
       payments: initialPayments,
-      note: `Bill hợp đồng. Tiền thuê tháng đầu: ${monthlyRentNum.toLocaleString("vi-VN")} đ. Tiền cọc còn lại: ${depositRemaining.toLocaleString("vi-VN")} đ. Đã đóng ở phiếu thu cọc giữ phòng: ${receiptBillPaidAmount.toLocaleString("vi-VN")} đ. Tổng phải đóng: ${totalRemainingAmount.toLocaleString("vi-VN")} đ.`,
+      note: `Bill hợp đồng (Prorated). Tiền thuê tháng đầu (${daysLivedInFirstMonth}/${daysInStartMonth} ngày): ${proratedRent.toLocaleString("vi-VN")} đ. Tiền cọc còn lại: ${depositRemaining.toLocaleString("vi-VN")} đ. Đã đóng ở phiếu thu cọc giữ phòng: ${receiptBillPaidAmount.toLocaleString("vi-VN")} đ. Tổng phải đóng: ${totalRemainingAmount.toLocaleString("vi-VN")} đ.`,
     });
 
     const populated = await FinalContract.findById(finalContract._id)

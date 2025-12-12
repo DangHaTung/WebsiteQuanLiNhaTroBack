@@ -838,7 +838,8 @@ export const extendReceipt = async (req, res) => {
             : monthlyRentNum;
           
           contractBill.amountDue = toDec(depositRemaining + firstMonthRent);
-          contractBill.amountPaid = toDec(totalReceiptPaid); // Cập nhật amountPaid = tổng đã thanh toán ở RECEIPT
+          // KHÔNG cập nhật amountPaid từ RECEIPT bills - mỗi hóa đơn phải độc lập
+          // amountPaid của CONTRACT bill chỉ được cập nhật khi thanh toán CONTRACT bill
           await contractBill.save();
         }
       }
