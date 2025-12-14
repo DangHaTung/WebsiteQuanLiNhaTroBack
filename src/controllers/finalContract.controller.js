@@ -1261,6 +1261,12 @@ export const rentAdditionalRoom = async (req, res) => {
       checkinDate: new Date(startDate),
     });
 
+    // Cập nhật Room: status = OCCUPIED, occupantCount = 1 (chỉ người thuê chính)
+    await Room.findByIdAndUpdate(roomId, {
+      status: "OCCUPIED",
+      occupantCount: 1,
+    });
+
     console.log(`✅ Created additional room contract: FinalContract ${finalContract._id}, Bill ${bill._id}`);
 
     // Populate data

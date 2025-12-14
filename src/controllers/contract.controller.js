@@ -80,13 +80,17 @@ export const getMyContracts = async (req, res) => {
 // Lấy toàn bộ hợp đồng (admin)
 export const getAllContracts = async (req, res) => {
   try {
-    const { page = 1, limit = 100, status } = req.query;
+    const { page = 1, limit = 100, status, tenantId } = req.query;
     const skip = (page - 1) * limit;
 
     const filter = {};
     if (status) {
       // Nếu client yêu cầu cụ thể status, dùng status đó
       filter.status = status;
+    }
+    if (tenantId) {
+      // Filter theo tenantId nếu có
+      filter.tenantId = tenantId;
     }
     // Nếu không có status filter, lấy tất cả (ACTIVE, ENDED, CANCELED) - để frontend có thể hiển thị tất cả
 
@@ -838,16 +842,18 @@ export const linkCoTenantToContract = async (req, res) => {
 
 // ============== addCoTenant ==============
 // POST /api/contracts/:id/add-cotenant
-// Admin thêm người ở cùng vào contract và tạo user luôn
+// Admin thêm người ở cùng vào contract (có thể chọn user có sẵn hoặc tạo mới)
 export const addCoTenant = async (req, res) => {
   try {
     const { id } = req.params;
-    const { fullName, phone, email, password, identityNo } = req.body;
+    const { existingUserId, fullName, phone, email, password, identityNo } = req.body;
 
-    if (!fullName || !phone || !email || !password) {
+    // Nếu chọn user có sẵn, chỉ cần existingUserId
+    // Nếu tạo mới, cần fullName, phone, email, password
+    if (!existingUserId && (!fullName || !phone || !email || !password)) {
       return res.status(400).json({
         success: false,
-        message: "fullName, phone, email, and password are required",
+        message: "Vui lòng chọn người dùng có sẵn hoặc điền đầy đủ thông tin (fullName, phone, email, password)",
       });
     }
 
@@ -879,51 +885,77 @@ export const addCoTenant = async (req, res) => {
       });
     }
 
-    // Kiểm tra đã tồn tại chưa (theo phone)
-    const exists = contract.coTenants?.find((ct) => ct.phone === phone && ct.status === "ACTIVE");
-    if (exists) {
-      return res.status(400).json({
-        success: false,
-        message: "Số điện thoại này đã được thêm vào hợp đồng",
-      });
-    }
-
-    // Tạo user mới
     const User = (await import("../models/user.model.js")).default;
-    const bcrypt = (await import("bcrypt")).default;
+    let user;
 
-    // Check email đã tồn tại chưa
-    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Email hoặc số điện thoại đã được sử dụng",
+    if (existingUserId) {
+      // Chọn user có sẵn
+      user = await User.findById(existingUserId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "Người dùng không tồn tại",
+        });
+      }
+
+      // Kiểm tra user này đã được thêm vào contract chưa
+      const exists = contract.coTenants?.find(
+        (ct) => ct.userId?.toString() === existingUserId && ct.status === "ACTIVE"
+      );
+      if (exists) {
+        return res.status(400).json({
+          success: false,
+          message: "Người dùng này đã được thêm vào hợp đồng",
+        });
+      }
+
+      console.log(`✅ Using existing user ${user._id} (${user.fullName}) as co-tenant`);
+    } else {
+      // Tạo user mới
+      const bcrypt = (await import("bcrypt")).default;
+
+      // Kiểm tra đã tồn tại chưa (theo phone)
+      const existsByPhone = contract.coTenants?.find((ct) => ct.phone === phone && ct.status === "ACTIVE");
+      if (existsByPhone) {
+        return res.status(400).json({
+          success: false,
+          message: "Số điện thoại này đã được thêm vào hợp đồng",
+        });
+      }
+
+      // Check email đã tồn tại chưa
+      const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: "Email hoặc số điện thoại đã được sử dụng trong hệ thống",
+        });
+      }
+
+      // Hash password
+      const passwordHash = await bcrypt.hash(password, 10);
+
+      // Tạo user
+      user = await User.create({
+        fullName,
+        email,
+        phone,
+        passwordHash,
+        role: "TENANT",
+        identityNo,
       });
+
+      console.log(`✅ Created new user ${user._id} for co-tenant ${fullName}`);
     }
-
-    // Hash password
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    // Tạo user
-    const newUser = await User.create({
-      fullName,
-      email,
-      phone,
-      passwordHash,
-      role: "TENANT",
-      identityNo,
-    });
-
-    console.log(`✅ Created user ${newUser._id} for co-tenant ${fullName}`);
 
     // Thêm vào coTenants với userId
     if (!contract.coTenants) contract.coTenants = [];
     contract.coTenants.push({
-      userId: newUser._id,
-      fullName,
-      phone,
-      email,
-      identityNo,
+      userId: user._id,
+      fullName: user.fullName,
+      phone: user.phone,
+      email: user.email,
+      identityNo: user.identityNo || identityNo,
       joinedAt: new Date(),
       status: "ACTIVE", // Mặc định là ACTIVE khi thêm mới
     });
@@ -940,18 +972,20 @@ export const addCoTenant = async (req, res) => {
       occupantCount: newOccupantCount
     });
 
-    console.log(`✅ Added co-tenant ${fullName} to contract ${id}, updated room ${room.roomNumber} occupantCount to ${newOccupantCount}`);
+    console.log(`✅ Added co-tenant ${user.fullName} to contract ${id}, updated room ${room.roomNumber} occupantCount to ${newOccupantCount}`);
 
     return res.status(200).json({
       success: true,
-      message: "Thêm người ở cùng thành công. Họ có thể đăng nhập ngay bây giờ.",
+      message: existingUserId 
+        ? "Thêm người ở cùng thành công."
+        : "Thêm người ở cùng thành công. Họ có thể đăng nhập ngay bây giờ.",
       data: {
         contract: formatContract(contract),
         user: {
-          _id: newUser._id,
-          fullName: newUser.fullName,
-          email: newUser.email,
-          phone: newUser.phone,
+          _id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
         },
       },
     });
