@@ -103,23 +103,36 @@ export const getAllContracts = async (req, res) => {
 
     // Filter thêm: loại bỏ contracts có room status = AVAILABLE (để đảm bảo tính nhất quán)
     // Vì nếu room đã về AVAILABLE thì contract không nên còn ACTIVE
+    // ✅ FIX: Chỉ hiển thị contracts đã thuê chính thức (room status = OCCUPIED)
+    // Không hiển thị contracts có room status = DEPOSITED (mới cọc, chưa có hợp đồng chính thức)
     const Room = (await import("../models/room.model.js")).default;
     const filteredContracts = [];
     
     for (const contract of contracts) {
-      // Chỉ filter: Nếu contract có status = ACTIVE nhưng room đã về AVAILABLE, bỏ qua (không nhất quán)
-      // Các contract CANCELED hoặc ENDED vẫn hiển thị để user biết lịch sử
-      if (contract.status === "ACTIVE" && contract.roomId) {
+      if (contract.roomId) {
         const roomId = typeof contract.roomId === 'object' ? contract.roomId._id : contract.roomId;
         if (roomId) {
           const room = await Room.findById(roomId).select("status");
-          if (room && room.status === "AVAILABLE") {
-            console.log(`⚠️ Skipping contract ${contract._id} - room ${roomId} is AVAILABLE but contract is ACTIVE`);
-            continue; // Bỏ qua contract này (không nhất quán)
+          if (room) {
+            // ✅ FIX: Chỉ hiển thị contract nếu room status = OCCUPIED (đã thuê chính thức)
+            // Bỏ qua nếu room status = AVAILABLE hoặc DEPOSITED
+            if (room.status === "AVAILABLE") {
+              // Room đã về trống → contract không nên còn ACTIVE (không nhất quán)
+              if (contract.status === "ACTIVE") {
+                console.log(`⚠️ Skipping contract ${contract._id} - room ${roomId} is AVAILABLE but contract is ACTIVE`);
+                continue;
+              }
+              // Các contract CANCELED hoặc ENDED với room AVAILABLE vẫn hiển thị để user biết lịch sử
+            } else if (room.status === "DEPOSITED") {
+              // ✅ FIX: Room chỉ mới được cọc, chưa có hợp đồng chính thức → Bỏ qua (không hiển thị trong "Quản lý người ở cùng")
+              console.log(`⚠️ Skipping contract ${contract._id} - room ${roomId} is DEPOSITED (only deposited, not officially rented yet)`);
+              continue;
+            }
+            // Room status = OCCUPIED → Contract đã thuê chính thức → Hiển thị
           }
         }
       }
-      // Các contract CANCELED, ENDED, hoặc ACTIVE hợp lệ đều được thêm vào
+      // Các contract với room OCCUPIED, CANCELED, ENDED đều được thêm vào
       filteredContracts.push(contract);
     }
 
@@ -557,8 +570,14 @@ export const refundDeposit = async (req, res) => {
     
     console.log('[refundDeposit] Calculation: totalDepositPaid=', totalDepositPaid, 'serviceFees=', serviceFees.totalAmount, 'damage=', damageAmountNum, 'refund=', refundAmount);
 
+    // Thời điểm kết thúc/hủy do hoàn cọc (dùng để hiển thị "Hủy:" ở UI)
+    // Lưu ý: nghiệp vụ set status=ENDED nhưng UI cần mốc thời gian (canceledAt) để hiển thị.
+    const endedAt = new Date();
+
     // Cập nhật contract (giữ lại co-tenants, không xóa)
     contract.status = "ENDED"; // Set sang ENDED khi hoàn cọc
+    // Dùng field canceledAt như "ngày hết hiệu lực" để UI hiển thị nhất quán
+    contract.canceledAt = endedAt;
     
     // Đánh dấu tất cả co-tenants là hết hiệu lực (status = EXPIRED) khi hợp đồng kết thúc
     if (contract.coTenants && contract.coTenants.length > 0) {
@@ -574,7 +593,7 @@ export const refundDeposit = async (req, res) => {
     contract.depositRefunded = true;
     contract.depositRefund = {
       amount: mongoose.Types.Decimal128.fromString(refundAmount.toFixed(2)),
-      refundedAt: new Date(),
+      refundedAt: endedAt,
       method,
       note,
       damageAmount: mongoose.Types.Decimal128.fromString(damageAmountNum.toFixed(2)),
@@ -618,7 +637,7 @@ export const refundDeposit = async (req, res) => {
           const oldStatus = moveOutRequest.status;
           moveOutRequest.status = "WAITING_CONFIRMATION";
           moveOutRequest.refundProcessed = true;
-          moveOutRequest.refundedAt = new Date(); // Lưu thời gian hoàn cọc
+          moveOutRequest.refundedAt = endedAt; // Lưu thời gian hoàn cọc
           await moveOutRequest.save();
           
           // Verify sau khi save
@@ -663,6 +682,8 @@ export const refundDeposit = async (req, res) => {
     if (mainTenantFinalContract) {
       console.log(`[refundDeposit] Found FinalContract ${mainTenantFinalContract._id} (status: ${mainTenantFinalContract.status}) for main tenant ${contract.tenantId}, canceling...`);
       mainTenantFinalContract.status = "CANCELED";
+      // ✅ Ghi thời điểm hủy để UI hiển thị ở cột "Thời gian"
+      mainTenantFinalContract.canceledAt = endedAt;
       await mainTenantFinalContract.save();
       console.log(`[refundDeposit] FinalContract ${mainTenantFinalContract._id} canceled successfully`);
     } else {
@@ -994,6 +1015,74 @@ export const addCoTenant = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Lỗi khi thêm người ở cùng",
+      error: error.message,
+    });
+  }
+};
+
+// ============== removeCoTenant ==============
+// POST /api/contracts/:id/remove-cotenant/:userId
+// Admin gỡ người ở cùng khỏi contract (không xóa tài khoản)
+export const removeCoTenant = async (req, res) => {
+  try {
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin) return res.status(403).json({ success: false, message: "Forbidden" });
+
+    const { id, userId } = req.params;
+
+    const contract = await Contract.findById(id).populate("roomId");
+    if (!contract) {
+      return res.status(404).json({ success: false, message: "Contract not found" });
+    }
+
+    const activeIndex = (contract.coTenants || []).findIndex(
+      (ct) => ct.userId?.toString() === userId?.toString() && ct.status === "ACTIVE"
+    );
+
+    if (activeIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy người ở cùng đang hoạt động trong hợp đồng này",
+      });
+    }
+
+    // Đánh dấu hết hiệu lực (không xóa record để giữ lịch sử)
+    contract.coTenants[activeIndex].status = "EXPIRED";
+    contract.coTenants[activeIndex].leftAt = new Date();
+    await contract.save();
+
+    // Cập nhật occupantCount của phòng: giảm 1 (không nhỏ hơn 1 nếu phòng đang OCCUPIED)
+    try {
+      const Room = (await import("../models/room.model.js")).default;
+      const roomId = contract.roomId?._id || contract.roomId;
+      if (roomId) {
+        const room = await Room.findById(roomId).select("occupantCount status");
+        if (room) {
+          const current = Number(room.occupantCount || 0);
+          const next = Math.max(room.status === "OCCUPIED" ? 1 : 0, current - 1);
+          room.occupantCount = next;
+          await room.save();
+        }
+      }
+    } catch (e) {
+      console.warn("Cannot update room occupantCount after removing co-tenant:", e?.message || e);
+    }
+
+    // Return updated contract (populate tenant/room for FE)
+    const populated = await Contract.findById(id)
+      .populate("tenantId", "fullName email phone")
+      .populate("roomId", "roomNumber pricePerMonth status occupantCount");
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã gỡ người ở cùng khỏi phòng",
+      data: formatContract(populated),
+    });
+  } catch (error) {
+    console.error("removeCoTenant error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi gỡ người ở cùng",
       error: error.message,
     });
   }

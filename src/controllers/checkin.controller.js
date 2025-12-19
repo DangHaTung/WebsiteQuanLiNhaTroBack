@@ -16,6 +16,35 @@ function toDec(n) {
   return mongoose.Types.Decimal128.fromString(Number(n).toFixed(2));
 }
 
+// Chuyển Decimal128 / {$numberDecimal} / string -> number
+function toNum(v) {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  if (typeof v === "string") {
+    const n = parseFloat(v);
+    return Number.isNaN(n) ? 0 : n;
+  }
+  // Mongoose Decimal128 may serialize as {$numberDecimal: "..."}
+  try {
+    if (typeof v === "object" && "$numberDecimal" in v) {
+      const n = parseFloat(v.$numberDecimal);
+      return Number.isNaN(n) ? 0 : n;
+    }
+  } catch { /* ignore */ }
+  if (v?.toString) {
+    const n = parseFloat(v.toString());
+    return Number.isNaN(n) ? 0 : n;
+  }
+  return 0;
+}
+
+function idToString(v) {
+  if (!v) return null;
+  if (typeof v === "string") return v;
+  if (typeof v === "object" && v._id) return String(v._id);
+  return String(v);
+}
+
 // Thêm số tháng vào ngày
 function addMonths(date, months) {
   const d = new Date(date);
@@ -426,7 +455,7 @@ export const createOnlineCheckin = async (req, res) => {
     const crypto = (await import("crypto")).default;
     const token = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30); // Valid for 30 days
+    expiresAt.setDate(expiresAt.getDate() + 5); // Valid for 5 days
 
     receiptBill.paymentToken = token;
     receiptBill.paymentTokenExpires = expiresAt;
@@ -618,13 +647,92 @@ export const getAllCheckins = async (req, res) => {
       .limit(parseInt(limit))
       .skip(skip);
 
+    // Fallback: một số checkin (vd: tạo từ "+ thuê thêm phòng") không set tenantId/tenantSnapshot.
+    // -> Lấy tenantId từ contractId.tenantId và bơm vào tenantSnapshot để FE không bị N/A.
+    const tenantIdsToFetch = new Set();
+    const tenantIdsNeedIdentityOrAddress = new Set();
+    for (const c of checkins) {
+      const hasSnapshot =
+        !!c.tenantSnapshot?.fullName ||
+        !!c.tenantSnapshot?.phone ||
+        !!c.tenantSnapshot?.email;
+      if (hasSnapshot) continue;
+      const tid = idToString(c.tenantId) || idToString(c.contractId?.tenantId) || idToString(c.finalContractId?.tenantId);
+      if (tid) tenantIdsToFetch.add(tid);
+    }
+    const usersById = new Map();
+    if (tenantIdsToFetch.size > 0) {
+      const users = await User.find({ _id: { $in: Array.from(tenantIdsToFetch) } }).select("fullName email phone role");
+      for (const u of users) usersById.set(String(u._id), u);
+    }
+
+    // Fallback CCCD/địa chỉ: User model không có, nên lấy từ checkin snapshot mới nhất của tenant
+    for (const c of checkins) {
+      const tid = idToString(c.tenantId) || idToString(c.contractId?.tenantId) || idToString(c.finalContractId?.tenantId);
+      if (!tid) continue;
+      const missingIdentity = !c.tenantSnapshot?.identityNo;
+      const missingAddress = !c.tenantSnapshot?.address;
+      if (missingIdentity || missingAddress) tenantIdsNeedIdentityOrAddress.add(tid);
+    }
+    const snapshotByTenant = new Map();
+    if (tenantIdsNeedIdentityOrAddress.size > 0) {
+      const snapshots = await Checkin.find({
+        tenantId: { $in: Array.from(tenantIdsNeedIdentityOrAddress) },
+        status: { $ne: "CANCELED" },
+        $or: [
+          { "tenantSnapshot.identityNo": { $exists: true, $ne: "" } },
+          { "tenantSnapshot.address": { $exists: true, $ne: "" } },
+        ],
+      })
+        .sort({ createdAt: -1 })
+        .select("tenantId tenantSnapshot createdAt");
+      for (const s of snapshots) {
+        const tid = idToString(s.tenantId);
+        if (!tid) continue;
+        if (!snapshotByTenant.has(tid)) {
+          snapshotByTenant.set(tid, s.tenantSnapshot || {});
+        }
+      }
+    }
+
     const total = await Checkin.countDocuments(filter);
 
     // Convert Decimal128 to numbers and ensure all fields are included
     const formattedCheckins = checkins.map(c => {
       const obj = c.toObject();
-      obj.deposit = obj.deposit ? parseFloat(obj.deposit.toString()) : 0;
-      obj.monthlyRent = obj.monthlyRent ? parseFloat(obj.monthlyRent.toString()) : 0;
+      // ✅ Ensure deposit/monthlyRent exist even for checkins created without these fields
+      const depositSource = obj.deposit ?? obj.contractId?.deposit ?? obj.roomId?.pricePerMonth;
+      const rentSource = obj.monthlyRent ?? obj.contractId?.monthlyRent ?? obj.roomId?.pricePerMonth;
+      obj.deposit = toNum(depositSource);
+      obj.monthlyRent = toNum(rentSource);
+
+      // ✅ Ensure tenantSnapshot exists for FE display
+      const tid = idToString(obj.tenantId) || idToString(obj.contractId?.tenantId) || idToString(obj.finalContractId?.tenantId);
+      const u = tid ? usersById.get(String(tid)) : null;
+      const snap = tid ? snapshotByTenant.get(String(tid)) : null;
+      if (u) {
+        obj.tenantSnapshot = {
+          ...(obj.tenantSnapshot || {}),
+          fullName: obj.tenantSnapshot?.fullName || u.fullName || "",
+          phone: obj.tenantSnapshot?.phone || u.phone || "",
+          email: obj.tenantSnapshot?.email || u.email || "",
+          identityNo: obj.tenantSnapshot?.identityNo || snap?.identityNo || obj.contractId?.tenantSnapshot?.identityNo || "",
+          address: obj.tenantSnapshot?.address || snap?.address || "",
+          note: obj.tenantSnapshot?.note || obj.notes || "",
+        };
+        // Nếu checkin thiếu tenantId thì gắn minimal object để client dùng khi cần
+        if (!obj.tenantId) {
+          obj.tenantId = { _id: String(u._id), fullName: u.fullName, email: u.email, phone: u.phone, role: u.role };
+        }
+      } else if (snap) {
+        // Không có user (hiếm) nhưng vẫn có snapshot từ checkin trước
+        obj.tenantSnapshot = {
+          ...(obj.tenantSnapshot || {}),
+          identityNo: obj.tenantSnapshot?.identityNo || snap?.identityNo || obj.contractId?.tenantSnapshot?.identityNo || "",
+          address: obj.tenantSnapshot?.address || snap?.address || "",
+        };
+      }
+
       // Ensure initialElectricReading is included if it exists
       if (obj.initialElectricReading !== undefined && obj.initialElectricReading !== null) {
         obj.initialElectricReading = Number(obj.initialElectricReading);
@@ -984,8 +1092,55 @@ export const getCheckinById = async (req, res) => {
 
     // Convert Decimal128 to numbers
     const obj = checkin.toObject();
-    obj.deposit = obj.deposit ? parseFloat(obj.deposit.toString()) : 0;
-    obj.monthlyRent = obj.monthlyRent ? parseFloat(obj.monthlyRent.toString()) : 0;
+    // ✅ Ensure deposit/monthlyRent exist even for checkins created without these fields
+    const depositSource = obj.deposit ?? obj.contractId?.deposit ?? obj.roomId?.pricePerMonth;
+    const rentSource = obj.monthlyRent ?? obj.contractId?.monthlyRent ?? obj.roomId?.pricePerMonth;
+    obj.deposit = toNum(depositSource);
+    obj.monthlyRent = toNum(rentSource);
+
+    // ✅ Ensure tenantSnapshot exists for FE display (fallback via contractId.tenantId)
+    const tid = idToString(obj.tenantId) || idToString(obj.contractId?.tenantId) || idToString(obj.finalContractId?.tenantId);
+    if (tid) {
+      let u = null;
+      // Nếu tenantId đã populate thì có sẵn thông tin
+      if (obj.tenantId && typeof obj.tenantId === "object" && obj.tenantId.fullName) {
+        u = obj.tenantId;
+      } else {
+        u = await User.findById(tid).select("fullName email phone role");
+      }
+      // CCCD/địa chỉ: lấy từ snapshot checkin mới nhất của tenant (trừ chính record này)
+      let prevSnap = null;
+      const missingIdentity = !obj.tenantSnapshot?.identityNo;
+      const missingAddress = !obj.tenantSnapshot?.address;
+      if (missingIdentity || missingAddress) {
+        prevSnap = await Checkin.findOne({
+          tenantId: tid,
+          _id: { $ne: obj._id },
+          status: { $ne: "CANCELED" },
+          $or: [
+            { "tenantSnapshot.identityNo": { $exists: true, $ne: "" } },
+            { "tenantSnapshot.address": { $exists: true, $ne: "" } },
+          ],
+        })
+          .sort({ createdAt: -1 })
+          .select("tenantSnapshot");
+      }
+      if (u) {
+        obj.tenantSnapshot = {
+          ...(obj.tenantSnapshot || {}),
+          fullName: obj.tenantSnapshot?.fullName || u.fullName || "",
+          phone: obj.tenantSnapshot?.phone || u.phone || "",
+          email: obj.tenantSnapshot?.email || u.email || "",
+          identityNo: obj.tenantSnapshot?.identityNo || prevSnap?.tenantSnapshot?.identityNo || obj.contractId?.tenantSnapshot?.identityNo || "",
+          address: obj.tenantSnapshot?.address || prevSnap?.tenantSnapshot?.address || "",
+          note: obj.tenantSnapshot?.note || obj.notes || "",
+        };
+        if (!obj.tenantId) {
+          obj.tenantId = { _id: String(u._id), fullName: u.fullName, email: u.email, phone: u.phone, role: u.role };
+        }
+      }
+    }
+
     if (obj.initialElectricReading !== undefined && obj.initialElectricReading !== null) {
       obj.initialElectricReading = Number(obj.initialElectricReading);
     }

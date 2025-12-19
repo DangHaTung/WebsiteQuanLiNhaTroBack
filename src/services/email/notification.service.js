@@ -3,6 +3,39 @@ import nodemailer from 'nodemailer';
 import { createTransport } from 'nodemailer';
 
 /**
+ * Thông tin tài khoản ngân hàng (giống client)
+ */
+const bankInfo = {
+  accountNumber: process.env.BANK_ACCOUNT_NUMBER || "1903 7801 6150 17",
+  accountName: process.env.BANK_ACCOUNT_NAME || "HOANG VAN QUYNH",
+  bankName: process.env.BANK_NAME || "TECHCOMBANK",
+  bankBin: process.env.BANK_BIN || "970407"
+};
+
+/**
+ * Format description cho VietQR (loại bỏ dấu, ký tự đặc biệt)
+ */
+function formatDescriptionForQR(description) {
+  return description
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .replace(/[^a-zA-Z0-9 ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Tạo VietQR URL
+ */
+function generateVietQRUrl(amount, description) {
+  const formattedDesc = formatDescriptionForQR(description);
+  const accountNo = bankInfo.accountNumber.replace(/\s/g, "");
+  return `https://img.vietqr.io/image/${bankInfo.bankBin}-${accountNo}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(formattedDesc)}&accountName=${encodeURIComponent(bankInfo.accountName)}`;
+}
+
+/**
  * Tạo transporter cho nodemailer
  */
 function createTransporter() {
@@ -41,11 +74,22 @@ export async function sendEmailNotification({ to, subject, html, text }) {
   
   try {
     const info = await transporter.sendMail({
-      from: `"${process.env.EMAIL_FROM_NAME || 'Hệ thống Quản lý Phòng trọ'}" <${process.env.EMAIL_USER}>`,
+      from: `"${process.env.EMAIL_FROM_NAME || 'Ban Quản lý Phòng Tro360'}" <${process.env.EMAIL_USER}>`,
       to,
       subject,
       text: text || 'Email notification',
       html,
+      // ✅ FIX: Thêm envelope để tránh DMARC fail
+      envelope: {
+        from: process.env.EMAIL_USER,
+        to,
+      },
+      // ✅ FIX: Thêm headers để Gmail hiểu đây là mail hệ thống
+      headers: {
+        'X-Mailer': 'Tro360 System Mailer',
+        'X-Priority': '3',
+        'Auto-Submitted': 'auto-generated',
+      },
     });
     
     console.log('✅ Email đã gửi:', info.messageId);
@@ -94,8 +138,9 @@ export async function sendBillNotificationToTenant({ tenant, bill, room }) {
 /**
  * Gửi email link thanh toán cho khách hàng
  */
-export async function sendPaymentLinkEmail({ to, fullName, paymentUrl, billId, amount, roomNumber, expiresAt }) {
-  const subject = `Link thanh toán tiền cọc - Phòng ${roomNumber}`;
+export async function sendPaymentLinkEmail({ to, fullName, paymentUrl, billId, amount, roomNumber, expiresAt, paymentToken }) {
+  // ✅ FIX: Cải thiện subject để tránh spam words
+  const subject = `Thông báo khoản cần xác nhận – Phòng ${roomNumber}`;
   
   const expiresDate = new Date(expiresAt).toLocaleDateString('vi-VN', {
     year: 'numeric',
@@ -104,6 +149,49 @@ export async function sendPaymentLinkEmail({ to, fullName, paymentUrl, billId, a
     hour: '2-digit',
     minute: '2-digit',
   });
+
+  // Tạo VietQR URL
+  const description = `Thanh toan tien coc phong ${roomNumber} ${billId.slice(-6)}`;
+  const qrCodeUrl = generateVietQRUrl(amount, description);
+  const accountNo = bankInfo.accountNumber.replace(/\s/g, "");
+
+  // Tạo link để upload ảnh bill sau khi chuyển khoản
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const uploadReceiptUrl = paymentToken 
+    ? `${frontendUrl}/public/payment/${billId}/${paymentToken}/upload-receipt`
+    : null;
+
+  // ✅ FIX: Thêm text version đầy đủ
+  const text = `
+Xin chào ${fullName},
+
+Bạn có một khoản thanh toán cho phòng ${roomNumber}.
+
+Thông tin thanh toán:
+- Mã phiếu thu: ${billId.substring(0, 8)}...
+- Phòng: ${roomNumber}
+- Số tiền: ${(amount || 0).toLocaleString('vi-VN')} VNĐ
+- Link có hiệu lực đến: ${expiresDate}
+
+Link thanh toán: ${paymentUrl}
+
+Thông tin chuyển khoản ngân hàng:
+- Ngân hàng: ${bankInfo.bankName}
+- Số tài khoản: ${accountNo}
+- Chủ tài khoản: ${bankInfo.accountName}
+- Nội dung: ${description}
+
+Bạn có thể quét mã QR trong email để chuyển khoản nhanh chóng.
+
+${uploadReceiptUrl ? `\nSau khi chuyển khoản, vui lòng truy cập link sau để upload ảnh bill:\n${uploadReceiptUrl}\n` : ''}
+
+Lưu ý: Link thanh toán này chỉ có hiệu lực trong 5 ngày. Vui lòng thanh toán trước khi hết hạn.
+
+Nếu có thắc mắc, vui lòng liên hệ ${process.env.EMAIL_USER}.
+
+Trân trọng,
+Ban quản lý
+  `.trim();
 
   const html = `
     <!DOCTYPE html>
@@ -120,17 +208,21 @@ export async function sendPaymentLinkEmail({ to, fullName, paymentUrl, billId, a
         .button { display: inline-block; padding: 12px 24px; background-color: #1890ff; color: white; text-decoration: none; border-radius: 5px; margin-top: 15px; }
         .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #666; }
         .warning { background-color: #fff3cd; border: 1px solid #ffc107; padding: 10px; margin-top: 15px; border-radius: 5px; }
+        .qr-section { background-color: white; padding: 20px; margin: 20px 0; border-radius: 8px; text-align: center; border: 2px solid #1890ff; }
+        .qr-code { max-width: 250px; height: auto; margin: 15px 0; border-radius: 8px; }
+        .bank-info { background-color: #f0f7ff; padding: 15px; margin: 15px 0; border-radius: 5px; border-left: 4px solid #1890ff; }
+        .bank-info-item { margin: 8px 0; }
       </style>
     </head>
     <body>
       <div class="container">
         <div class="header">
-          <h2>💳 Link thanh toán tiền cọc</h2>
+          <h2>💳 Thông báo khoản cần xác nhận</h2>
         </div>
         <div class="content">
           <p>Xin chào <strong>${fullName}</strong>,</p>
           
-          <p>Bạn đã được tạo phiếu thu tiền cọc. Vui lòng thanh toán qua link bên dưới:</p>
+          <p>Bạn có một khoản thanh toán cho phòng <strong>${roomNumber}</strong>.</p>
           
           <div class="info-box">
             <h3>Thông tin thanh toán:</h3>
@@ -141,13 +233,36 @@ export async function sendPaymentLinkEmail({ to, fullName, paymentUrl, billId, a
               <li><strong>Link có hiệu lực đến:</strong> ${expiresDate}</li>
             </ul>
           </div>
+
+          <!-- VietQR Section -->
+          <div class="qr-section">
+            <h3 style="margin-top: 0; color: #1890ff;">📱 Quét mã QR để chuyển khoản</h3>
+            <img src="${qrCodeUrl}" alt="VietQR Code" class="qr-code" />
+            <div class="bank-info">
+              <div class="bank-info-item"><strong>Ngân hàng:</strong> ${bankInfo.bankName}</div>
+              <div class="bank-info-item"><strong>Số tài khoản:</strong> ${accountNo}</div>
+              <div class="bank-info-item"><strong>Chủ tài khoản:</strong> ${bankInfo.accountName}</div>
+              <div class="bank-info-item"><strong>Nội dung:</strong> ${description}</div>
+            </div>
+          </div>
+
+          ${uploadReceiptUrl ? `
+          <!-- Upload Receipt Section -->
+          <div style="background-color: #f0f9ff; padding: 20px; margin: 20px 0; border-radius: 8px; border: 2px solid #1890ff; text-align: center;">
+            <h3 style="margin-top: 0; color: #1890ff;">📸 Đã chuyển khoản?</h3>
+            <p style="margin: 10px 0;">Sau khi chuyển khoản, vui lòng upload ảnh bill để admin xác nhận:</p>
+            <a href="${uploadReceiptUrl}" class="button" style="background-color: #52c41a; border-color: #52c41a; margin-top: 10px;">
+              📤 Xác nhận đã chuyển khoản
+            </a>
+          </div>
+          ` : ''}
           
           <div style="text-align: center; margin: 30px 0;">
-            <a href="${paymentUrl}" class="button">🔗 Thanh toán ngay</a>
+            <a href="${paymentUrl}" class="button">🔗 Thanh toán trực tuyến</a>
           </div>
           
           <div class="warning">
-            <strong>⚠️ Lưu ý:</strong> Link thanh toán này chỉ có hiệu lực trong 30 ngày. Vui lòng thanh toán trước khi hết hạn.
+            <strong>⚠️ Lưu ý:</strong> Link thanh toán này chỉ có hiệu lực trong 5 ngày. Vui lòng thanh toán trước khi hết hạn.
           </div>
           
           <p style="margin-top: 20px;">Nếu bạn không thể click vào nút trên, vui lòng copy link sau vào trình duyệt:</p>
@@ -156,7 +271,7 @@ export async function sendPaymentLinkEmail({ to, fullName, paymentUrl, billId, a
           <p>Trân trọng,<br><strong>Ban quản lý</strong></p>
         </div>
         <div class="footer">
-          <p>Email tự động từ hệ thống quản lý phòng trọ</p>
+          <p>Email tự động từ Ban Quản lý Phòng Tro360</p>
           <p>Vui lòng không trả lời email này</p>
         </div>
       </div>
@@ -168,6 +283,7 @@ export async function sendPaymentLinkEmail({ to, fullName, paymentUrl, billId, a
     to,
     subject,
     html,
+    text,
   });
 }
 
@@ -175,7 +291,7 @@ export async function sendPaymentLinkEmail({ to, fullName, paymentUrl, billId, a
  * Gửi email thông báo tài khoản đã được tạo sau khi thanh toán thành công
  */
 export async function sendAccountCreatedEmail({ to, fullName, email, password, loginUrl }) {
-  const subject = `Tài khoản đã được tạo - Hệ thống Quản lý Phòng trọ`;
+  const subject = `Tài khoản đã được tạo - Ban Quản lý Phòng Tro360`;
   
   const html = `
     <!DOCTYPE html>
@@ -226,7 +342,7 @@ export async function sendAccountCreatedEmail({ to, fullName, email, password, l
           <p>Trân trọng,<br><strong>Ban quản lý</strong></p>
         </div>
         <div class="footer">
-          <p>Email tự động từ hệ thống quản lý phòng trọ</p>
+          <p>Email tự động từ Ban Quản lý Phòng Tro360</p>
           <p>Vui lòng không trả lời email này</p>
         </div>
       </div>
@@ -294,7 +410,7 @@ export async function sendPaymentSuccessEmail({ to, fullName, bill, amount, tran
           <p>Trân trọng,<br><strong>Ban quản lý</strong></p>
         </div>
         <div class="footer">
-          <p>Email tự động từ hệ thống quản lý phòng trọ</p>
+          <p>Email tự động từ Ban Quản lý Phòng Tro360</p>
           <p>Vui lòng không trả lời email này</p>
         </div>
       </div>

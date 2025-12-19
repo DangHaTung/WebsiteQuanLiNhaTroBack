@@ -10,12 +10,14 @@ import {
   refundDeposit,
   linkCoTenantToContract,
   addCoTenant,
+  removeCoTenant,
 } from "../controllers/contract.controller.js";
 import { 
   createContractSchema, 
   updateContractSchema, 
   contractParamsSchema,
-  refundDepositSchema
+  refundDepositSchema,
+  removeCoTenantParamsSchema,
 } from "../validations/contract.validation.js";
 import { 
   validateBody, 
@@ -42,5 +44,13 @@ router.post("/contracts/:id/refund-deposit", authenticateToken, authorize('ADMIN
 router.post("/contracts/:id/link-cotenant", authenticateToken, authorize('ADMIN'), validateParams(contractParamsSchema), asyncHandler(linkCoTenantToContract));
 // Add co-tenant (không cần thanh toán) - TEMP: Bỏ auth để test
 router.post("/contracts/:id/add-cotenant", validateParams(contractParamsSchema), asyncHandler(addCoTenant));
+// Remove co-tenant khỏi phòng (không xóa tài khoản)
+router.post(
+  "/contracts/:id/remove-cotenant/:userId",
+  authenticateToken,
+  authorize('ADMIN'),
+  validateParams(removeCoTenantParamsSchema),
+  asyncHandler(removeCoTenant)
+);
 
 export default router;

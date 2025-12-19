@@ -365,6 +365,13 @@ export const getBillById = async (req, res) => {
           { path: "roomId", select: "name roomNumber" },
         ],
       })
+      .populate({
+        path: "finalContractId",
+        populate: [
+          { path: "tenantId", select: "fullName email phone" },
+          { path: "roomId", select: "name roomNumber" },
+        ],
+      })
       .populate("tenantId", "fullName email phone");
     if (!bill) {
       return res.status(404).json({
@@ -375,6 +382,19 @@ export const getBillById = async (req, res) => {
 
     // Format bill để chuyển đổi Decimal128 sang number
     const formattedBill = formatBill(bill);
+    
+    // ✅ SỬA LẠI: Đảm bảo thông tin tenant được lấy đúng
+    // Ưu tiên lấy từ finalContractId.tenantId (cho hợp đồng thuê thêm phòng)
+    // Nếu không có, lấy từ contractId.tenantId
+    if (bill.finalContractId && typeof bill.finalContractId === 'object' && bill.finalContractId.tenantId) {
+      // Nếu finalContractId có tenantId, đảm bảo contractId cũng có thông tin tenant
+      if (!formattedBill.contractId || !formattedBill.contractId.tenantId) {
+        if (!formattedBill.contractId) {
+          formattedBill.contractId = {};
+        }
+        formattedBill.contractId.tenantId = bill.finalContractId.tenantId;
+      }
+    }
     
     // Nếu là MONTHLY bill và chưa có electricityReading đầy đủ, tự động tính từ checkin và bills trước
     const hasValidElectricityReading = bill.electricityReading && 
@@ -913,6 +933,40 @@ export const rejectCashPayment = async (req, res) => {
     // Chuyển status về UNPAID để khách có thể thanh toán lại
     bill.status = "UNPAID";
 
+    // ✅ REVERT: Nếu là RECEIPT bill, revert room status về AVAILABLE và checkin status
+    if (bill.billType === "RECEIPT") {
+      const Checkin = (await import("../models/checkin.model.js")).default;
+      const Room = (await import("../models/room.model.js")).default;
+      
+      // Tìm checkin liên quan (checkin có receiptBillId = bill._id)
+      const checkin = await Checkin.findOne({ receiptBillId: bill._id });
+      
+      if (checkin && checkin.roomId) {
+        const roomId = typeof checkin.roomId === 'object' ? checkin.roomId._id : checkin.roomId;
+        
+        if (roomId) {
+          // Revert room status về AVAILABLE (nếu đang là DEPOSITED)
+          const room = await Room.findById(roomId);
+          if (room && room.status === "DEPOSITED") {
+            room.status = "AVAILABLE";
+            room.occupantCount = 0;
+            await room.save();
+            console.log(`✅ [REJECT PAYMENT] Reverted room ${roomId} status from DEPOSITED to AVAILABLE`);
+          }
+          
+          // Revert checkin: xóa receiptPaidAt và set status về CREATED nếu đã COMPLETED
+          if (checkin.receiptPaidAt || checkin.status === "COMPLETED") {
+            checkin.receiptPaidAt = undefined;
+            if (checkin.status === "COMPLETED") {
+              checkin.status = "CREATED";
+            }
+            await checkin.save();
+            console.log(`✅ [REJECT PAYMENT] Reverted checkin ${checkin._id} - removed receiptPaidAt and set status to CREATED`);
+          }
+        }
+      }
+    }
+
     await bill.save();
 
     // 🔔 Gửi thông báo cho khách hàng (nếu có service)
@@ -966,6 +1020,14 @@ export const cancelBill = async (req, res) => {
         .json({ success: false, message: "Không tìm thấy hóa đơn" });
     }
 
+    // ✅ Validate cho MONTHLY bills: chỉ được hủy khi chưa thanh toán (UNPAID)
+    if (bill.billType === "MONTHLY" && bill.status !== "UNPAID") {
+      return res.status(400).json({
+        success: false,
+        message: "Chỉ được hủy hóa đơn hàng tháng khi ở trạng thái 'Chưa thanh toán'",
+      });
+    }
+
     if (bill.status === "VOID") {
       return res
         .status(200)
@@ -1007,7 +1069,54 @@ export const cancelBill = async (req, res) => {
   }
 };
 
-// (ĐÃ BỎ) Delete bill: không dùng trong nghiệp vụ — route đã gỡ bỏ
+/**
+ * deleteDraftBill
+ * ----------------
+ * Xóa cứng bill DRAFT (nháp) — chỉ dùng cho MONTHLY draft bills
+ * Input: billId
+ * Output: success
+ * Quyền hạn: admin
+ */
+export const deleteDraftBill = async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const bill = await Bill.findById(req.params.id);
+    if (!bill) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
+    }
+
+    if (bill.status !== "DRAFT") {
+      return res.status(400).json({
+        success: false,
+        message: "Chỉ được xóa hóa đơn ở trạng thái nháp (DRAFT)",
+      });
+    }
+
+    // Chỉ cho phép xóa DRAFT bills của MONTHLY để tránh xóa nhầm bill nghiệp vụ khác
+    if (bill.billType !== "MONTHLY") {
+      return res.status(400).json({
+        success: false,
+        message: "Chỉ được xóa hóa đơn nháp hàng tháng (MONTHLY)",
+      });
+    }
+
+    await Bill.deleteOne({ _id: bill._id });
+    return res.status(200).json({
+      success: true,
+      message: "Đã xóa hóa đơn nháp",
+      data: { billId: String(bill._id) },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi khi xóa hóa đơn nháp",
+      error: err.message,
+    });
+  }
+};
 
 /**
  * Lấy tất cả bills DRAFT (nháp) - Admin only
@@ -1139,6 +1248,26 @@ export const publishDraftBill = async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "Không tìm thấy thông tin phòng" });
+    }
+
+    // ✅ RULE: Mỗi phòng (contract) chỉ được phát hành 1 hóa đơn MONTHLY / tháng
+    // Nếu đã có hóa đơn MONTHLY đã phát hành trong cùng tháng (không phải DRAFT/VOID), không cho publish thêm.
+    const bd = new Date(bill.billingDate);
+    const startOfMonth = new Date(bd.getFullYear(), bd.getMonth(), 1);
+    const endOfMonth = new Date(bd.getFullYear(), bd.getMonth() + 1, 0, 23, 59, 59);
+    const existingIssuedSameMonth = await Bill.findOne({
+      _id: { $ne: bill._id },
+      contractId: bill.contractId._id,
+      billType: "MONTHLY",
+      status: { $nin: ["DRAFT", "VOID"] },
+      billingDate: { $gte: startOfMonth, $lte: endOfMonth },
+    }).select("_id status billingDate");
+    if (existingIssuedSameMonth) {
+      return res.status(409).json({
+        success: false,
+        message: `Phòng ${contract.roomId.roomNumber} đã có hóa đơn tháng ${bd.getMonth() + 1}/${bd.getFullYear()} được phát hành rồi.`,
+        data: { existingBillId: existingIssuedSameMonth._id },
+      });
     }
 
     // Validation: Chặn phát hành nếu còn hóa đơn tháng trước chưa thanh toán
@@ -1282,6 +1411,25 @@ export const publishBatchDraftBills = async (req, res) => {
           results.failed.push({
             billId,
             error: "Bill không hợp lệ hoặc không phải DRAFT",
+          });
+          continue;
+        }
+
+        // ✅ RULE: Mỗi phòng (contract) chỉ được phát hành 1 hóa đơn MONTHLY / tháng
+        const bd = new Date(bill.billingDate);
+        const startOfMonth = new Date(bd.getFullYear(), bd.getMonth(), 1);
+        const endOfMonth = new Date(bd.getFullYear(), bd.getMonth() + 1, 0, 23, 59, 59);
+        const existingIssuedSameMonth = await Bill.findOne({
+          _id: { $ne: bill._id },
+          contractId: bill.contractId._id,
+          billType: "MONTHLY",
+          status: { $nin: ["DRAFT", "VOID"] },
+          billingDate: { $gte: startOfMonth, $lte: endOfMonth },
+        }).select("_id status billingDate");
+        if (existingIssuedSameMonth) {
+          results.failed.push({
+            billId,
+            error: `Đã có hóa đơn tháng ${bd.getMonth() + 1}/${bd.getFullYear()} được phát hành cho phòng này.`,
           });
           continue;
         }
@@ -2001,9 +2149,9 @@ export const generatePaymentLink = async (req, res) => {
     const crypto = await import("crypto");
     const token = crypto.randomBytes(32).toString("hex");
 
-    // Token expires in 30 days
+    // Token expires in 5 days
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
+    expiresAt.setDate(expiresAt.getDate() + 5);
 
     // Save token to bill
     bill.paymentToken = token;
@@ -2075,6 +2223,7 @@ export const generatePaymentLink = async (req, res) => {
         amount: amountNum,
         roomNumber,
         expiresAt,
+        paymentToken: token, // ✅ Thêm paymentToken để tạo link upload ảnh
       });
       console.log("✅ Email đã được gửi đến:", tenantEmail);
     } catch (emailError) {

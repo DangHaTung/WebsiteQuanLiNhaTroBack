@@ -1,5 +1,5 @@
 import express from "express";
-import { getAllBills, getBillById, createBill, updateBill, getMyBills, confirmCashReceipt, rejectCashPayment, cancelBill, calculateMonthlyFees, generatePaymentLink } from "../controllers/bill.controller.js";
+import { getAllBills, getBillById, createBill, updateBill, getMyBills, confirmCashReceipt, rejectCashPayment, cancelBill, calculateMonthlyFees, generatePaymentLink, deleteDraftBill } from "../controllers/bill.controller.js";
 import { 
   createBillSchema, 
   updateBillSchema, 
@@ -44,6 +44,8 @@ router.post("/bills/:id/confirm-payment", authenticateToken, authorize('ADMIN'),
 router.post("/bills/:id/reject-payment", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(rejectCashPayment));
 // Hủy hóa đơn (cancel) thay cho delete
 router.put("/bills/:id/cancel", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(cancelBill));
+// Xóa bill nháp (DRAFT) — chỉ cho MONTHLY draft bills
+router.delete("/bills/:id", authenticateToken, authorize('ADMIN'), validateParams(billParamsSchema), asyncHandler(deleteDraftBill));
 // Tính toán phí dịch vụ (cho hoàn cọc)
 router.post("/bills/calculate-monthly-fees", authenticateToken, authorize('ADMIN'), asyncHandler(calculateMonthlyFees));
 // Generate payment link và gửi email (admin only)

@@ -44,6 +44,7 @@
     "@babel/core": "^7.27.1",
     "@babel/node": "^7.27.1",
     "@babel/preset-env": "^7.27.2",
+    "baseline-browser-mapping": "^2.9.7",
     "nodemon": "^3.1.10"
   }
 }

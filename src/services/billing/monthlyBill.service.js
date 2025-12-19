@@ -333,8 +333,17 @@ export async function createMonthlyBillForRoom({
     throw new Error(`Không tìm thấy hợp đồng với ID: ${contractId}`);
   }
 
-  if (contract.status !== "ACTIVE") {
-    throw new Error(`Hợp đồng ${contractId} không ở trạng thái ACTIVE`);
+  // ✅ SỬA LẠI: Không yêu cầu Contract phải ACTIVE nếu đã có FinalContract SIGNED
+  // Kiểm tra xem có FinalContract SIGNED không
+  const FinalContract = (await import("../../models/finalContract.model.js")).default;
+  const finalContract = await FinalContract.findOne({
+    originContractId: contractId,
+    status: "SIGNED"
+  });
+  
+  // Nếu không có FinalContract SIGNED, thì Contract phải ACTIVE
+  if (!finalContract && contract.status !== "ACTIVE") {
+    throw new Error(`Hợp đồng ${contractId} không ở trạng thái ACTIVE và chưa có FinalContract SIGNED`);
   }
 
   const room = contract.roomId;
@@ -346,6 +355,24 @@ export async function createMonthlyBillForRoom({
   const billingMonth = new Date(billingDate);
     const startOfMonth = new Date(billingMonth.getFullYear(), billingMonth.getMonth(), 1);
     const endOfMonth = new Date(billingMonth.getFullYear(), billingMonth.getMonth() + 1, 0, 23, 59, 59);
+
+  // ✅ RULE: Mỗi phòng (contract) chỉ được phát hành 1 hóa đơn MONTHLY / tháng
+  // Nếu đã có bill MONTHLY đã phát hành trong tháng (không phải DRAFT/VOID) thì không tạo thêm (kể cả tạo draft).
+  const existingPublishedBill = await Bill.findOne({
+    contractId,
+    billType: "MONTHLY",
+    status: { $nin: ["DRAFT", "VOID"] },
+    billingDate: {
+      $gte: startOfMonth,
+      $lte: endOfMonth,
+    },
+  }).select("_id billingDate status");
+
+  if (existingPublishedBill) {
+    throw new Error(
+      `Đã tồn tại hóa đơn đã phát hành tháng ${billingMonth.getMonth() + 1}/${billingMonth.getFullYear()} cho phòng ${room.roomNumber}`
+    );
+  }
 
   // Nếu đang tạo DRAFT bill (electricityKwh = 0), xóa draft cũ trước (cho phép tạo lại)
   if (electricityKwh === 0) {
@@ -364,25 +391,6 @@ export async function createMonthlyBillForRoom({
       await Bill.deleteOne({ _id: existingDraftBill._id });
     }
   }
-
-  // [TEST MODE] Comment out để cho phép tạo lại bill nhiều lần
-  // Kiểm tra xem đã có hóa đơn đã phát hành (UNPAID/PAID) cho tháng này chưa
-  // Không cho phép tạo lại nếu đã có bill đã phát hành
-  // const existingPublishedBill = await Bill.findOne({
-  //   contractId,
-  //   status: { $in: ["UNPAID", "PARTIALLY_PAID", "PAID"] },
-  //   billType: "MONTHLY",
-  //   billingDate: {
-  //     $gte: startOfMonth,
-  //     $lte: endOfMonth,
-  //   },
-  // });
-
-  // if (existingPublishedBill) {
-  //   throw new Error(
-  //     `Đã tồn tại hóa đơn đã phát hành tháng ${billingMonth.getMonth() + 1}/${billingMonth.getFullYear()} cho phòng ${room.roomNumber}`
-  //     );
-  // }
 
   // Tính toán các khoản phí
   const feeCalculation = await calculateRoomMonthlyFees({
@@ -461,53 +469,54 @@ export async function createMonthlyBillsForAllRooms({
     },
   };
 
-  // Lấy tất cả hợp đồng ACTIVE
-  const activeContracts = await Contract.find({ status: "ACTIVE" })
+  // ✅ SỬA LẠI LOGIC: Tìm từ FinalContract với status "SIGNED" thay vì Contract
+  // Vì sau khi có FinalContract, Contract có thể không còn ACTIVE
+  // Lấy tất cả FinalContract SIGNED
+  const signedFinalContracts = await FinalContract.find({ status: "SIGNED" })
     .populate("roomId")
-    .populate("tenantId", "fullName email phone");
+    .populate("tenantId", "fullName email phone")
+    .populate("originContractId");
 
-  results.summary.total = activeContracts.length;
+  results.summary.total = signedFinalContracts.length;
 
-  for (const contract of activeContracts) {
+  for (const finalContract of signedFinalContracts) {
     try {
-      const room = contract.roomId;
+      const room = finalContract.roomId;
       if (!room) {
         results.failed.push({
-          contractId: contract._id,
+          finalContractId: finalContract._id,
           error: "Không tìm thấy thông tin phòng",
         });
         results.summary.errors++;
         continue;
       }
 
-      // ✅ VALIDATION: Chỉ tạo bill MONTHLY nếu:
-      // 1. Có FinalContract SIGNED
-      // 2. Bill CONTRACT đã PAID
-      
-      // Kiểm tra FinalContract
-      const finalContract = await FinalContract.findOne({ 
-        originContractId: contract._id,
-        status: "SIGNED"
-      });
-      
-      if (!finalContract) {
+      // Lấy originContractId từ FinalContract
+      const contract = finalContract.originContractId;
+      if (!contract) {
         results.failed.push({
-          contractId: contract._id,
+          finalContractId: finalContract._id,
           roomNumber: room.roomNumber,
-          error: "Chưa có hợp đồng chính thức (FinalContract) hoặc chưa ký",
+          error: "Không tìm thấy Contract gốc",
         });
-        results.summary.skipped++;
+        results.summary.errors++;
         continue;
       }
 
+      // ✅ VALIDATION: Chỉ tạo bill MONTHLY nếu:
+      // 1. FinalContract đã SIGNED (đã kiểm tra ở trên)
+      // 2. Bill CONTRACT đã PAID
+      
       // Kiểm tra Bill CONTRACT đã thanh toán chưa
+      // Tìm bill CONTRACT theo finalContractId (vì bill CONTRACT được tạo với finalContractId)
       const contractBill = await Bill.findOne({
-        contractId: contract._id,
+        finalContractId: finalContract._id,
         billType: "CONTRACT",
       });
       
       if (!contractBill || contractBill.status !== "PAID") {
         results.failed.push({
+          finalContractId: finalContract._id,
           contractId: contract._id,
           roomNumber: room.roomNumber,
           error: "Bill CONTRACT (tháng đầu) chưa thanh toán",
@@ -522,7 +531,7 @@ export async function createMonthlyBillsForAllRooms({
       const waterM3 = usage.waterM3 || 0;
       const occupantCount = usage.occupantCount || 1;
 
-      // Tạo hóa đơn
+      // Tạo hóa đơn (dùng contractId từ originContractId)
       const result = await createMonthlyBillForRoom({
         contractId: contract._id,
         electricityKwh,
@@ -531,9 +540,16 @@ export async function createMonthlyBillsForAllRooms({
         billingDate,
       });
 
+      // Cập nhật finalContractId cho bill MONTHLY
+      if (result.bill) {
+        result.bill.finalContractId = finalContract._id;
+        await result.bill.save();
+      }
+
       results.success.push({
         billId: result.bill._id,
         contractId: contract._id,
+        finalContractId: finalContract._id,
         roomNumber: result.room.roomNumber,
         tenantName: result.tenant?.fullName || "N/A",
         totalAmount: toNum(result.bill.amountDue),
@@ -544,16 +560,18 @@ export async function createMonthlyBillsForAllRooms({
       // Nếu lỗi là "đã tồn tại hóa đơn", đánh dấu là skipped
       if (error.message.includes("Đã tồn tại hóa đơn")) {
         results.failed.push({
-          contractId: contract._id,
-          roomNumber: contract.roomId?.roomNumber || "N/A",
+          finalContractId: finalContract._id,
+          contractId: finalContract.originContractId?._id || "N/A",
+          roomNumber: finalContract.roomId?.roomNumber || "N/A",
           error: error.message,
           type: "SKIPPED",
         });
         results.summary.skipped++;
       } else {
         results.failed.push({
-          contractId: contract._id,
-          roomNumber: contract.roomId?.roomNumber || "N/A",
+          finalContractId: finalContract._id,
+          contractId: finalContract.originContractId?._id || "N/A",
+          roomNumber: finalContract.roomId?.roomNumber || "N/A",
           error: error.message,
           type: "ERROR",
         });

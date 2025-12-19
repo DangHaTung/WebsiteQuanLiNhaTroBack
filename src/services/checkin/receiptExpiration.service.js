@@ -276,7 +276,7 @@ async function sendExpirationWarningEmail(checkin, daysRemaining) {
           <p>Trân trọng,<br><strong>Ban quản lý</strong></p>
         </div>
         <div class="footer">
-          <p>Email tự động từ hệ thống quản lý phòng trọ</p>
+          <p>Email tự động từ Ban Quản lý Phòng Tro360</p>
           <p>Vui lòng không trả lời email này</p>
         </div>
       </div>
@@ -346,7 +346,7 @@ async function sendExpirationCancelEmail(checkin) {
           <p>Trân trọng,<br><strong>Ban quản lý</strong></p>
         </div>
         <div class="footer">
-          <p>Email tự động từ hệ thống quản lý phòng trọ</p>
+          <p>Email tự động từ Ban Quản lý Phòng Tro360</p>
           <p>Vui lòng không trả lời email này</p>
         </div>
       </div>

@@ -6,6 +6,7 @@ import Room from "../models/room.model.js";
 import paymentController from "../controllers/payment.controller.js";
 import momoController from "../controllers/momo.controller.js";
 import zaloController from "../controllers/paymentZalo.controller.js";
+import { uploadReceiptImage } from "../middleware/upload.middleware.js";
 
 const router = express.Router();
 
@@ -61,6 +62,7 @@ router.get("/payment/:billId/:token", async (req, res) => {
           amountDue: convertDecimal128(bill.amountDue),
           amountPaid: convertDecimal128(bill.amountPaid),
           billingDate: bill.billingDate,
+          metadata: bill.metadata || {}, // ✅ Thêm metadata để frontend có thể check receiptImage
         },
         contract: contract ? {
           _id: contract._id,
@@ -156,6 +158,131 @@ router.post("/payment/:billId/:token/create", async (req, res) => {
     return res.status(500).json({
       error: "Server error",
       message: error.message,
+    });
+  }
+});
+
+/**
+ * Upload receipt image for cash payment (PUBLIC - no auth required, uses paymentToken)
+ * POST /api/public/payment/:billId/:token/upload-receipt
+ */
+router.post("/payment/:billId/:token/upload-receipt", uploadReceiptImage, async (req, res) => {
+  console.log("📤 [PUBLIC UPLOAD RECEIPT] Request received:", {
+    billId: req.params.billId,
+    token: req.params.token?.substring(0, 10) + "...",
+    hasFile: !!req.file,
+  });
+  try {
+    const { billId, token } = req.params;
+    const { amount } = req.body;
+
+    // Verify token
+    const bill = await Bill.findById(billId);
+    if (!bill) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy hóa đơn" });
+    }
+
+    if (!bill.paymentToken || bill.paymentToken !== token) {
+      return res.status(403).json({ success: false, message: "Token không hợp lệ" });
+    }
+
+    if (bill.paymentTokenExpires && new Date() > bill.paymentTokenExpires) {
+      return res.status(403).json({ success: false, message: "Token đã hết hạn" });
+    }
+
+    // Check bill status
+    if (bill.status === "PAID") {
+      return res.status(400).json({ success: false, message: "Hóa đơn này đã được thanh toán" });
+    }
+
+    if (bill.status === "PENDING_CASH_CONFIRM") {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Hóa đơn này đang chờ admin xác nhận. Vui lòng chờ xử lý." 
+      });
+    }
+
+    // Convert Decimal128 to number
+    const convertDecimal128 = (value) => {
+      if (value === null || value === undefined) return 0;
+      return parseFloat(value.toString());
+    };
+
+    // Validate amount
+    const amountDue = convertDecimal128(bill.amountDue);
+    const amountPaid = convertDecimal128(bill.amountPaid);
+    let balance = 0;
+    
+    if (bill.billType === "CONTRACT" && (bill.status === "UNPAID" || bill.status === "PENDING_CASH_CONFIRM")) {
+      balance = amountDue;
+    } else {
+      balance = amountDue - amountPaid;
+    }
+
+    const amountNum = amount ? Number(amount) : balance;
+    if (isNaN(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ success: false, message: "Số tiền không hợp lệ" });
+    }
+
+    if (amountNum > balance + 1) {
+      return res.status(400).json({
+        success: false,
+        message: `Số tiền thanh toán (${amountNum.toLocaleString('vi-VN')} VNĐ) vượt quá số tiền còn lại (${balance.toLocaleString('vi-VN')} VNĐ)`,
+      });
+    }
+
+    // Check if receipt image was uploaded
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Vui lòng upload ảnh bill chuyển khoản" 
+      });
+    }
+
+    // Update bill status to PENDING_CASH_CONFIRM
+    bill.status = "PENDING_CASH_CONFIRM";
+
+    // Save request info to metadata
+    if (!bill.metadata) bill.metadata = {};
+    bill.metadata.cashPaymentRequest = {
+      requestedAt: new Date(),
+      requestedAmount: amountNum,
+      requestedVia: "PUBLIC_PAYMENT_LINK", // Đánh dấu là từ public link
+    };
+
+    // Save receipt image
+    bill.metadata.cashPaymentRequest.receiptImage = {
+      url: req.file.path,
+      secure_url: req.file.secure_url || req.file.path,
+      public_id: req.file.filename,
+      resource_type: req.file.resource_type || "image",
+      format: req.file.format,
+      bytes: req.file.size,
+    };
+
+    // Ensure Mongoose saves the metadata changes
+    try {
+      bill.markModified && bill.markModified('metadata');
+    } catch (e) {
+      // no-op
+    }
+
+    await bill.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Đã gửi yêu cầu xác nhận thanh toán. Admin sẽ xem xét và xác nhận trong thời gian sớm nhất.",
+      data: {
+        billId: bill._id,
+        status: bill.status,
+      },
+    });
+  } catch (error) {
+    console.error("uploadReceiptForCashPayment error:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Lỗi khi upload ảnh bill", 
+      error: error.message 
     });
   }
 });

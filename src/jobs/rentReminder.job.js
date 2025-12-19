@@ -119,7 +119,7 @@ async function sendAdminReport(results) {
         <ul>${errorDetails}</ul>
       ` : ''}
       
-      <p><em>Email tự động từ hệ thống quản lý phòng trọ</em></p>
+      <p><em>Email tự động từ Ban Quản lý Phòng Tro360</em></p>
     `;
     
     await sendEmailNotification({
