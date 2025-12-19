@@ -34,6 +34,16 @@ const formatFinalContract = (fc) => {
     obj.roomId.pricePerMonth = toNumber(obj.roomId.pricePerMonth);
   }
 
+  // ✅ Fallback canceledAt:
+  // Một số luồng auto-hủy (vd: hoàn cọc) trước đây chỉ set status=CANCELED nhưng chưa lưu canceledAt.
+  // Nếu thiếu canceledAt, lấy từ originContractId.depositRefund.refundedAt hoặc originContractId.canceledAt.
+  if (obj.status === "CANCELED" && !obj.canceledAt) {
+    const origin = obj.originContractId;
+    const fromRefund = origin?.depositRefund?.refundedAt;
+    const fromCanceled = origin?.canceledAt;
+    obj.canceledAt = fromRefund || fromCanceled || obj.canceledAt;
+  }
+
   // Add helper view/download URLs for uploaded files (images/PDFs)
   const addFileLinks = (file) => {
     const base = file?.secure_url || file?.url;
@@ -100,7 +110,8 @@ export const createFromContract = async (req, res) => {
     }
 
     // Scan flags no longer required per updated business rule
-    const checkin = await (await import("../models/checkin.model.js")).default.findOne({ contractId: contract._id });
+    const CheckinModel = (await import("../models/checkin.model.js")).default;
+    const checkin = await CheckinModel.findOne({ contractId: contract._id });
     if (!checkin) {
       return res.status(400).json({ success: false, message: "Check-in record not found for contract" });
     }
@@ -143,13 +154,48 @@ export const createFromContract = async (req, res) => {
       }
     }
 
-    // Lấy số tiền đã thanh toán ở phiếu thu cọc giữ phòng
+    // Lấy tổng số tiền đã thanh toán ở tất cả các phiếu thu cọc giữ phòng (RECEIPT bills)
+    // QUAN TRỌNG: Chỉ tính các RECEIPT bills còn hạn (chưa quá 3 ngày từ receiptPaidAt)
+    // Nếu phiếu thu đã hết hạn (checkin bị hủy hoặc quá 3 ngày), tiền đó không được tính vào tiền cọc
+    // Logic: Khi phiếu thu hết hạn, khách mất tiền đó (không được tính vào tiền cọc)
+    
+    // Tìm checkin hiện tại (chưa bị hủy) có receiptPaidAt mới nhất
+    // Lấy checkin mới nhất nếu có nhiều (trường hợp gia hạn)
+    const activeCheckins = await CheckinModel.find({
+      contractId: contract._id,
+      receiptPaidAt: { $exists: true, $ne: null },
+      status: { $ne: "CANCELED" } // Chỉ tính checkin chưa bị hủy
+    }).sort({ receiptPaidAt: -1 }).limit(1);
+    
+    const activeCheckin = activeCheckins && activeCheckins.length > 0 ? activeCheckins[0] : null;
+    
+    const now = new Date();
     let receiptBillPaidAmount = 0;
-    if (checkin.receiptBillId) {
-      const receiptBill = await Bill.findById(checkin.receiptBillId);
-      if (receiptBill) {
-        receiptBillPaidAmount = toNum(receiptBill.amountPaid) || 0;
+    let allReceiptBills = []; // Khai báo ở ngoài để dùng sau
+    
+    if (activeCheckin && activeCheckin.receiptPaidAt) {
+      // Tính expiration date = receiptPaidAt + 3 ngày
+      const receiptPaidAt = new Date(activeCheckin.receiptPaidAt);
+      const expirationDate = new Date(receiptPaidAt);
+      expirationDate.setDate(expirationDate.getDate() + 3);
+      
+      // Chỉ tính nếu phiếu thu còn hạn (chưa quá 3 ngày)
+      if (expirationDate > now) {
+        // Tìm tất cả RECEIPT bills đã PAID cho contract này
+        // Nếu checkin còn hạn, tính tổng tất cả các receipt bills đã PAID
+        // (bao gồm cả các bills từ lần cọc trước khi gia hạn)
+        allReceiptBills = await Bill.find({
+          contractId: contract._id,
+          billType: "RECEIPT",
+          status: "PAID"
+        });
+        
+        // Tính tổng amountPaid từ tất cả các receipt bills
+        receiptBillPaidAmount = allReceiptBills.reduce((sum, bill) => {
+          return sum + (toNum(bill.amountPaid) || 0);
+        }, 0);
       }
+      // Nếu phiếu thu đã hết hạn (expirationDate <= now), không tính vào tiền cọc (receiptBillPaidAmount = 0)
     }
 
     // Determine tenantId: prefer contract.tenantId, else allow missing (gán sau)
@@ -173,68 +219,109 @@ export const createFromContract = async (req, res) => {
     });
 
     // Create 1 bill CONTRACT gộp: Tiền thuê tháng đầu + Tiền cọc (1 tháng tiền phòng)
-    // Logic mới:
-    // - Tiền thuê tháng đầu: 5tr (chờ thanh toán)
-    // - Tiền cọc 1 tháng tiền phòng: 5tr - 500k (đã cọc giữ phòng) = 4tr5 (chờ thanh toán)
-    // - Tổng phải đóng: 5tr + 4tr5 = 9tr5
+    // Logic đúng:
+    // - CONTRACT bill chỉ có 2 lineItems:
+    //   1. "Tiền thuê tháng đầu" = 5tr (chờ thanh toán)
+    //   2. "Tiền cọc (1 tháng tiền phòng)" = monthlyRent - receiptBillPaidAmount = 5tr - 3tr = 2tr (chờ thanh toán)
     // 
-    // amountDue = số tiền còn lại phải đóng (9tr5)
-    // amountPaid = số tiền đã đóng (500k từ phiếu thu cọc giữ phòng)
+    // - Khoản 1 "Cọc giữ phòng" được frontend lấy từ RECEIPT bill riêng (không nằm trong CONTRACT bill)
+    // - amountDue = tổng 2 khoản trong CONTRACT bill = 5tr + 2tr = 7tr
+    // - amountPaid = số tiền đã đóng ở phiếu thu (để frontend tính toán) = 3tr
     const monthlyRentNum = toNum(contract.monthlyRent);
-    const depositRemaining = Math.max(0, monthlyRentNum - receiptBillPaidAmount); // Cọc còn lại phải đóng: 5tr - 500k = 4tr5
-    const totalRemainingAmount = monthlyRentNum + depositRemaining; // Tổng còn lại: 5tr + 4tr5 = 9tr5
-
-    // Xác định status ban đầu
-    // Khi mới tạo: status = UNPAID (chờ thanh toán)
-    // Vì các khoản 2 và 3 chưa thanh toán, chỉ có khoản 1 (cọc giữ phòng) đã thanh toán
-    let initialStatus = "UNPAID";
-    let initialAmountPaid = receiptBillPaidAmount; // 500k
-    if (receiptBillPaidAmount >= totalRemainingAmount) {
-      // Nếu đã đóng đủ tổng (9tr5), thì status = PAID
-      initialStatus = "PAID";
-      initialAmountPaid = totalRemainingAmount;
-    } else if (receiptBillPaidAmount > 0) {
-      // Nếu đã đóng một phần (500k), nhưng vẫn để UNPAID vì các khoản 2 và 3 chưa thanh toán
-      // Chỉ khi thanh toán thêm thì mới chuyển sang PARTIALLY_PAID hoặc PAID
-      initialStatus = "UNPAID";
+    if (!monthlyRentNum || monthlyRentNum <= 0) {
+      throw new Error(`Invalid monthlyRent: ${monthlyRentNum}. Contract monthlyRent is required and must be > 0.`);
+    }
+    const depositRemaining = Math.max(0, monthlyRentNum - receiptBillPaidAmount); // Cọc còn lại phải đóng: 5tr - 3tr = 2tr
+    const totalRemainingAmount = monthlyRentNum + depositRemaining; // Tổng 2 khoản trong CONTRACT bill: 5tr + 2tr = 7tr
+    
+    // Validate các giá trị trước khi tạo bill
+    if (isNaN(depositRemaining) || isNaN(totalRemainingAmount) || isNaN(receiptBillPaidAmount)) {
+      throw new Error(`Invalid calculation: depositRemaining=${depositRemaining}, totalRemainingAmount=${totalRemainingAmount}, receiptBillPaidAmount=${receiptBillPaidAmount}`);
     }
 
-    // Copy payments từ receipt bill nếu có
+    // ✅ SỬA LẠI LOGIC: Tiền cọc ở phiếu thu CHỈ được tính vào "Tiền cọc (1 tháng tiền phòng)" (khoản 2)
+    // KHÔNG được tính vào "Tiền thuê tháng đầu" (khoản 3)
+    // Vì vậy, status LUÔN là UNPAID khi mới tạo, vì khoản 3 (Tiền thuê tháng đầu) chưa thanh toán
+    // amountPaid = receiptBillPaidAmount (để frontend biết đã đóng bao nhiêu ở phiếu thu, chỉ tính vào khoản 2)
+    let initialStatus = "UNPAID"; // LUÔN là UNPAID vì khoản 3 chưa thanh toán
+    let initialAmountPaid = receiptBillPaidAmount; // Số tiền đã đóng ở phiếu thu (chỉ tính vào khoản 2)
+    
+    // ✅ KHÔNG BAO GIỜ set status = PAID khi mới tạo, vì:
+    // - Khoản 3 "Tiền thuê tháng đầu" LUÔN chưa thanh toán khi mới tạo bill CONTRACT
+    // - receiptBillPaidAmount chỉ là tiền cọc giữ phòng, không phải tiền thuê tháng đầu
+
+    // Copy payments từ tất cả các receipt bills đã PAID
     let initialPayments = [];
-    if (checkin.receiptBillId) {
-      const receiptBill = await Bill.findById(checkin.receiptBillId);
-      if (receiptBill && receiptBill.payments && receiptBill.payments.length > 0) {
-        initialPayments = receiptBill.payments.map(p => ({
-          ...p,
-          note: p.note ? `${p.note} (từ phiếu thu cọc giữ phòng)` : "Từ phiếu thu cọc giữ phòng"
-        }));
+    if (allReceiptBills && allReceiptBills.length > 0) {
+      for (const receiptBill of allReceiptBills) {
+        if (receiptBill.payments && Array.isArray(receiptBill.payments) && receiptBill.payments.length > 0) {
+          try {
+            const billPayments = receiptBill.payments.map(p => {
+              // Chỉ copy các field hợp lệ, loại bỏ _id và các field không cần thiết
+              return {
+                paidAt: p.paidAt || new Date(),
+                amount: p.amount,
+                method: p.method || 'UNKNOWN',
+                provider: p.provider || 'UNKNOWN',
+                transactionId: p.transactionId || '',
+                note: p.note ? `${p.note} (từ phiếu thu cọc giữ phòng)` : "Từ phiếu thu cọc giữ phòng",
+                metadata: p.metadata || {}
+              };
+            });
+            initialPayments = initialPayments.concat(billPayments);
+          } catch (err) {
+            console.warn(`⚠️ Error copying payments from receipt bill ${receiptBill._id}:`, err.message);
+            // Bỏ qua bill này nếu có lỗi
+          }
+        }
       }
     }
 
-    await Bill.create({
+    // Log để debug
+    console.log(`📋 Creating CONTRACT bill for contract ${contract._id}:`);
+    console.log(`   - receiptBillPaidAmount (đã đóng ở phiếu thu): ${receiptBillPaidAmount.toLocaleString("vi-VN")} đ`);
+    console.log(`   - monthlyRentNum: ${monthlyRentNum.toLocaleString("vi-VN")} đ`);
+    console.log(`   - depositRemaining (Cọc còn lại): ${depositRemaining.toLocaleString("vi-VN")} đ`);
+    console.log(`   - totalRemainingAmount (tổng 2 khoản trong CONTRACT bill): ${totalRemainingAmount.toLocaleString("vi-VN")} đ`);
+    console.log(`   - initialAmountPaid (để frontend tính toán): ${initialAmountPaid.toLocaleString("vi-VN")} đ`);
+    console.log(`   - initialStatus: ${initialStatus}`);
+    console.log(`   - initialPayments count: ${initialPayments.length}`);
+    
+    const contractBill = await Bill.create({
       contractId: contract._id,
       finalContractId: finalContract._id, // Link to this specific FinalContract
       billingDate: new Date(),
       billType: "CONTRACT",
       status: initialStatus,
       lineItems: [
-        { item: "Tiền thuê tháng đầu", quantity: 1, unitPrice: contract.monthlyRent, lineTotal: contract.monthlyRent },
-        { item: "Tiền cọc (1 tháng tiền phòng)", quantity: 1, unitPrice: toDec(depositRemaining), lineTotal: toDec(depositRemaining) },
+        { 
+          item: "Tiền thuê tháng đầu", 
+          quantity: 1, 
+          unitPrice: contract.monthlyRent, 
+          lineTotal: contract.monthlyRent 
+        },
+        { 
+          item: "Tiền cọc (1 tháng tiền phòng)", 
+          quantity: 1, 
+          unitPrice: toDec(depositRemaining), 
+          lineTotal: toDec(depositRemaining) 
+        },
       ],
-      // amountDue = số tiền còn lại phải đóng (9tr5)
-      amountDue: toDec(totalRemainingAmount), // 9tr5
-      amountPaid: toDec(initialAmountPaid), // 500k
+      // amountDue = tổng 2 khoản trong CONTRACT bill (7tr = 5tr + 2tr)
+      amountDue: toDec(totalRemainingAmount), // 7tr
+      amountPaid: toDec(initialAmountPaid), // 3tr (đã đóng ở phiếu thu, để frontend tính toán)
       payments: initialPayments,
       note: `Bill hợp đồng. Tiền thuê tháng đầu: ${monthlyRentNum.toLocaleString("vi-VN")} đ. Tiền cọc còn lại: ${depositRemaining.toLocaleString("vi-VN")} đ. Đã đóng ở phiếu thu cọc giữ phòng: ${receiptBillPaidAmount.toLocaleString("vi-VN")} đ. Tổng phải đóng: ${totalRemainingAmount.toLocaleString("vi-VN")} đ.`,
     });
+    
+    console.log(`✅ Created CONTRACT bill ${contractBill._id}`);
 
     const populated = await FinalContract.findById(finalContract._id)
       .populate("tenantId", "fullName email phone role")
       .populate("roomId", "roomNumber pricePerMonth");
 
     // Cập nhật checkin để gán finalContractId
-    const Checkin = (await import("../models/checkin.model.js")).default;
-    await Checkin.updateOne(
+    await CheckinModel.updateOne(
       { contractId: contract._id },
       { $set: { finalContractId: finalContract._id } }
     );
@@ -783,14 +870,16 @@ export const cancelFinalContract = async (req, res) => {
       return res.status(400).json({ success: false, message: "Final contract already canceled" });
     }
 
-    // Hủy tất cả bills CONTRACT liên quan đến FinalContract này (chỉ hủy nếu chưa thanh toán)
+    // Hủy tất cả bills (CONTRACT và RECEIPT) liên quan đến FinalContract này (chỉ hủy nếu chưa thanh toán)
     const Bill = (await import("../models/bill.model.js")).default;
-    const bills = await Bill.find({
+    
+    // Hủy bills CONTRACT
+    const contractBills = await Bill.find({
       finalContractId: fc._id,
       billType: "CONTRACT"
     });
 
-    for (const bill of bills) {
+    for (const bill of contractBills) {
       // Chỉ hủy nếu bill chưa thanh toán hoặc chỉ thanh toán một phần
       if (bill.status !== "PAID") {
         bill.status = "VOID";
@@ -799,6 +888,30 @@ export const cancelFinalContract = async (req, res) => {
         console.log(`✅ Hủy bill CONTRACT ${bill._id} do hủy FinalContract ${fc._id}`);
       } else {
         console.log(`⚠️ Không thể hủy bill CONTRACT ${bill._id} vì đã thanh toán`);
+      }
+    }
+    
+    // Hủy bills RECEIPT liên quan đến Contract gốc (nếu có)
+    if (fc.originContractId) {
+      const originContractId = typeof fc.originContractId === 'object' && fc.originContractId._id
+        ? fc.originContractId._id
+        : fc.originContractId;
+      
+      const receiptBills = await Bill.find({
+        contractId: originContractId,
+        billType: "RECEIPT"
+      });
+      
+      for (const bill of receiptBills) {
+        // Chỉ hủy nếu bill chưa thanh toán
+        if (bill.status !== "PAID") {
+          bill.status = "VOID";
+          bill.note = bill.note ? `${bill.note} [Đã hủy do hủy hợp đồng chính thức]` : "Đã hủy do hủy hợp đồng chính thức";
+          await bill.save();
+          console.log(`✅ Hủy bill RECEIPT ${bill._id} do hủy FinalContract ${fc._id}`);
+        } else {
+          console.log(`⚠️ Không thể hủy bill RECEIPT ${bill._id} vì đã thanh toán`);
+        }
       }
     }
 
@@ -855,10 +968,10 @@ export const cancelFinalContract = async (req, res) => {
         await contract.save();
         console.log(`✅ Canceled Contract ${contract._id} in room ${roomId} when canceling FinalContract ${fc._id}`);
 
-        // Hủy Checkin CREATED liên quan đến Contract này
+        // Hủy TẤT CẢ Checkin liên quan đến Contract này (không chỉ status = "CREATED")
         const checkins = await Checkin.find({
           contractId: contract._id,
-          status: "CREATED"
+          status: { $ne: "CANCELED" } // Tìm tất cả checkin chưa bị hủy
         });
 
         for (const checkin of checkins) {
@@ -878,6 +991,23 @@ export const cancelFinalContract = async (req, res) => {
               console.log(`✅ Canceled receipt bill ${receiptBill._id} when canceling Checkin ${checkin._id}`);
             }
           }
+        }
+        
+        // ✅ SỬA LẠI: Hủy TẤT CẢ RECEIPT bills liên quan đến Contract này (không chỉ qua checkin.receiptBillId)
+        // Vì có thể có RECEIPT bills được tạo từ nơi khác hoặc không được link qua checkin
+        const allReceiptBills = await Bill.find({
+          contractId: contract._id,
+          billType: "RECEIPT",
+          status: { $ne: "PAID" } // Chỉ hủy nếu chưa thanh toán
+        });
+        
+        for (const receiptBill of allReceiptBills) {
+          receiptBill.status = "VOID";
+          receiptBill.note = receiptBill.note
+            ? `${receiptBill.note} [Đã hủy do hủy hợp đồng chính thức]`
+            : "Đã hủy do hủy hợp đồng chính thức";
+          await receiptBill.save();
+          console.log(`✅ Canceled receipt bill ${receiptBill._id} when canceling Contract ${contract._id}`);
         }
       }
     }
@@ -1151,6 +1281,20 @@ export const rentAdditionalRoom = async (req, res) => {
       return res.status(404).json({ success: false, message: "Tenant not found" });
     }
 
+    // ✅ Lấy snapshot CCCD/địa chỉ từ lần check-in trước (vì User model không lưu identity/address)
+    const CheckinSnapshotModel = (await import("../models/checkin.model.js")).default;
+    const latestSnapshotCheckin = await CheckinSnapshotModel.findOne({
+      tenantId: tenantId,
+      status: { $ne: "CANCELED" },
+      $or: [
+        { "tenantSnapshot.identityNo": { $exists: true, $ne: "" } },
+        { "tenantSnapshot.address": { $exists: true, $ne: "" } },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .select("tenantSnapshot");
+    const prevSnapshot = latestSnapshotCheckin?.tenantSnapshot || {};
+
     // Kiểm tra tenant đã có ít nhất 1 hợp đồng SIGNED chưa
     const existingContract = await FinalContract.findOne({
       tenantId: tenantId,
@@ -1243,15 +1387,84 @@ export const rentAdditionalRoom = async (req, res) => {
       note: `Hợp đồng thuê thêm phòng ${room.roomNumber} cho ${tenant.fullName}`,
     });
 
-    // Tạo Checkin record
+    // ✅ SỬA LẠI: Kiểm tra xem đã có checkin ACTIVE cho phòng này chưa
+    // Nếu có, hủy checkin cũ và RECEIPT bills liên quan trước khi tạo mới
     const Checkin = (await import("../models/checkin.model.js")).default;
+    // Bill đã được import ở đầu file
+    
+    // Tìm tất cả checkin ACTIVE (chưa bị hủy) cho phòng này
+    // Chỉ hủy checkin liên quan đến hợp đồng thuê thêm phòng (có finalContractId với status DRAFT hoặc chưa SIGNED)
+    const existingCheckins = await Checkin.find({
+      roomId: roomId,
+      status: { $ne: "CANCELED" },
+      finalContractId: { $exists: true, $ne: null } // Chỉ tìm checkin có finalContractId (hợp đồng thuê thêm phòng)
+    });
+    
+    // Hủy tất cả checkin cũ và RECEIPT bills liên quan
+    // Chỉ hủy checkin có FinalContract chưa SIGNED (DRAFT hoặc CANCELED)
+    for (const existingCheckin of existingCheckins) {
+      // Kiểm tra FinalContract status - query trực tiếp thay vì populate
+      if (existingCheckin.finalContractId) {
+        const finalContractId = typeof existingCheckin.finalContractId === 'object' 
+          ? existingCheckin.finalContractId._id 
+          : existingCheckin.finalContractId;
+        
+        const finalContract = await FinalContract.findById(finalContractId).select('status');
+        if (finalContract && finalContract.status === "SIGNED") {
+          console.log(`⚠️ Skipping Checkin ${existingCheckin._id} because FinalContract is SIGNED`);
+          continue; // Không hủy checkin của hợp đồng đã SIGNED
+        }
+      }
+      
+      // Hủy checkin
+      existingCheckin.status = "CANCELED";
+      await existingCheckin.save();
+      console.log(`✅ Canceled existing Checkin ${existingCheckin._id} before creating new one for room ${room.roomNumber}`);
+      
+      // Hủy RECEIPT bills liên quan nếu chưa thanh toán
+      if (existingCheckin.receiptBillId) {
+        const receiptBill = await Bill.findById(existingCheckin.receiptBillId);
+        if (receiptBill && receiptBill.status !== "PAID") {
+          receiptBill.status = "VOID";
+          receiptBill.note = receiptBill.note
+            ? `${receiptBill.note} [Đã hủy do tạo hợp đồng thuê thêm phòng mới]`
+            : "Đã hủy do tạo hợp đồng thuê thêm phòng mới";
+          await receiptBill.save();
+          console.log(`✅ Canceled receipt bill ${receiptBill._id} when creating new contract for room ${room.roomNumber}`);
+        }
+      }
+      
+      // Hủy tất cả RECEIPT bills khác liên quan đến contract của checkin này
+      if (existingCheckin.contractId) {
+        const contractId = typeof existingCheckin.contractId === 'object' 
+          ? existingCheckin.contractId._id 
+          : existingCheckin.contractId;
+        
+        const allReceiptBills = await Bill.find({
+          contractId: contractId,
+          billType: "RECEIPT",
+          status: { $ne: "PAID" }
+        });
+        
+        for (const receiptBill of allReceiptBills) {
+          receiptBill.status = "VOID";
+          receiptBill.note = receiptBill.note
+            ? `${receiptBill.note} [Đã hủy do tạo hợp đồng thuê thêm phòng mới]`
+            : "Đã hủy do tạo hợp đồng thuê thêm phòng mới";
+          await receiptBill.save();
+          console.log(`✅ Canceled receipt bill ${receiptBill._id} when creating new contract for room ${room.roomNumber}`);
+        }
+      }
+    }
     
     // Tính số tháng thuê
     const start = new Date(startDate);
     const end = new Date(endDate);
     const durationMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
     
+    // Tạo Checkin record mới
     await Checkin.create({
+      tenantId: tenantId, // ✅ gắn người thuê để hiển thị ở admin/checkins
       contractId: contract._id,
       finalContractId: finalContract._id,
       roomId: roomId,
@@ -1259,6 +1472,17 @@ export const rentAdditionalRoom = async (req, res) => {
       durationMonths: durationMonths,
       status: "CREATED",
       checkinDate: new Date(startDate),
+      // ✅ set tiền/ snapshot để UI không bị N/A (và không phụ thuộc việc load users ở FE)
+      deposit: toDec(depositNum),
+      monthlyRent: room.pricePerMonth,
+      tenantSnapshot: {
+        fullName: tenant?.fullName || "",
+        phone: tenant?.phone || "",
+        email: tenant?.email || "",
+        identityNo: prevSnapshot?.identityNo || "",
+        address: prevSnapshot?.address || "",
+        note: "Thuê thêm phòng",
+      },
     });
 
     // Cập nhật Room: status = OCCUPIED, occupantCount = 1 (chỉ người thuê chính)

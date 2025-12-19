@@ -223,6 +223,24 @@ export const contractParamsSchema = Joi.object({
     }),
 });
 
+// Params schema cho remove co-tenant
+export const removeCoTenantParamsSchema = Joi.object({
+  id: Joi.string()
+    .pattern(/^[0-9a-fA-F]{24}$/)
+    .required()
+    .messages({
+      'string.pattern.base': 'ID hợp đồng phải là ObjectId hợp lệ',
+      'any.required': 'ID hợp đồng là bắt buộc',
+    }),
+  userId: Joi.string()
+    .pattern(/^[0-9a-fA-F]{24}$/)
+    .required()
+    .messages({
+      'string.pattern.base': 'userId phải là ObjectId hợp lệ',
+      'any.required': 'userId là bắt buộc',
+    }),
+});
+
 // Schema cho refund deposit
 export const refundDepositSchema = Joi.object({
   electricityKwh: Joi.number().min(0).default(0),

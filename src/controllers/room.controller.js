@@ -90,18 +90,31 @@ export const getAllRooms = async (req, res) => {
                             status: "ACTIVE"
                         });
                         
-            // 3. Kiểm tra có Checkin với receipt bill chưa thanh toán không
-            const checkinWithUnpaidReceipt = await Checkin.findOne({
-                roomId: room._id,
-                status: "CREATED",
-                receiptBillId: { $exists: true }
-            });
-            
-            let hasUnpaidReceipt = false;
-            if (checkinWithUnpaidReceipt && checkinWithUnpaidReceipt.receiptBillId) {
-                const receiptBill = await Bill.findById(checkinWithUnpaidReceipt.receiptBillId);
-                if (receiptBill && (receiptBill.status === "UNPAID" || receiptBill.status === "PENDING_CASH_CONFIRM")) {
-                    hasUnpaidReceipt = true;
+            // 3. Kiểm tra có checkin với receipt đã thanh toán và còn hạn không
+            // Logic: Nếu có checkin với receiptPaidAt và phiếu thu còn hạn (chưa quá 3 ngày), phòng = DEPOSITED
+            // Nếu phiếu thu đã hết hạn hoặc checkin bị hủy, phòng = AVAILABLE
+            let hasValidPaidReceipt = false;
+            if (activeContract) {
+                const Checkin = (await import("../models/checkin.model.js")).default;
+                // Tìm checkin có receiptPaidAt (đã thanh toán phiếu thu)
+                const checkinWithReceipt = await Checkin.findOne({
+                    roomId: room._id,
+                    contractId: activeContract._id,
+                    receiptPaidAt: { $exists: true, $ne: null },
+                    status: { $ne: "CANCELED" } // Checkin chưa bị hủy
+                });
+                
+                if (checkinWithReceipt && checkinWithReceipt.receiptPaidAt) {
+                    // Kiểm tra xem phiếu thu còn hạn hay không (hạn = receiptPaidAt + 3 ngày)
+                    const receiptPaidAt = new Date(checkinWithReceipt.receiptPaidAt);
+                    const expirationDate = new Date(receiptPaidAt);
+                    expirationDate.setDate(expirationDate.getDate() + 3); // Thời hạn 3 ngày
+                    const now = new Date();
+                    
+                    // Chỉ coi là DEPOSITED nếu phiếu thu còn hạn (chưa quá 3 ngày)
+                    if (expirationDate > now) {
+                        hasValidPaidReceipt = true;
+                    }
                 }
             }
             
@@ -116,24 +129,12 @@ export const getAllRooms = async (req, res) => {
                     totalOccupants = signedContractsCount + activeCoTenants.length;
                 }
                 formatted.occupantCount = totalOccupants;
-            } else if (hasUnpaidReceipt) {
-                // Có receipt chưa thanh toán → phòng đã được cọc
+            } else if (hasValidPaidReceipt) {
+                // Có receipt đã thanh toán (PAID) và còn hạn → phòng đã được cọc
                 formatted.status = "DEPOSITED";
                 formatted.occupantCount = 0;
-            } else if (activeContract) {
-                // Có Contract ACTIVE (nhưng chưa có FinalContract SIGNED) → có thể là DEPOSITED hoặc đang xử lý
-                formatted.status = "DEPOSITED";
-                // Tính occupantCount từ co-tenants nếu có
-                let totalOccupants = 0;
-                if (activeContract.coTenants) {
-                    const activeCoTenants = activeContract.coTenants.filter(ct => ct.status === "ACTIVE");
-                    totalOccupants = 1 + activeCoTenants.length; // 1 người thuê chính + co-tenants
-                } else {
-                    totalOccupants = 1; // Chỉ có người thuê chính
-                }
-                formatted.occupantCount = totalOccupants;
-                } else {
-                // Không có dữ liệu liên quan → phòng còn trống
+            } else {
+                // Không có FinalContract SIGNED và receipt chưa thanh toán hoặc đã hết hạn → phòng còn trống
                 formatted.status = "AVAILABLE";
                 formatted.occupantCount = 0;
             }
