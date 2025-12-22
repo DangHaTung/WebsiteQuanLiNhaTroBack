@@ -42,8 +42,14 @@ router.delete("/contracts/:id", authenticateToken, authorize('ADMIN'), validateP
 router.post("/contracts/:id/refund-deposit", authenticateToken, authorize('ADMIN'), validateParams(contractParamsSchema), validateBody(refundDepositSchema), asyncHandler(refundDeposit));
 // Link co-tenant vào contract
 router.post("/contracts/:id/link-cotenant", authenticateToken, authorize('ADMIN'), validateParams(contractParamsSchema), asyncHandler(linkCoTenantToContract));
-// Add co-tenant (không cần thanh toán) - TEMP: Bỏ auth để test
-router.post("/contracts/:id/add-cotenant", validateParams(contractParamsSchema), asyncHandler(addCoTenant));
+// Add co-tenant (không cần thanh toán) - ADMIN only
+router.post(
+  "/contracts/:id/add-cotenant",
+  authenticateToken,
+  authorize('ADMIN'),
+  validateParams(contractParamsSchema),
+  asyncHandler(addCoTenant)
+);
 // Remove co-tenant khỏi phòng (không xóa tài khoản)
 router.post(
   "/contracts/:id/remove-cotenant/:userId",
