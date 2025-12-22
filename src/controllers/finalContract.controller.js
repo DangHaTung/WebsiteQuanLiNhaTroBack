@@ -879,6 +879,64 @@ export const cancelFinalContract = async (req, res) => {
       billType: "CONTRACT"
     });
 
+    // ✅ RULE (theo nghiệp vụ mới):
+    // - Nếu FinalContract chỉ mới được tạo để sinh bill CONTRACT (chưa thanh toán, chưa ký),
+    //   admin được phép "hủy để tạo lại" mà KHÔNG làm mất phiếu thu (checkin) đã thanh toán.
+    // - Chỉ khóa (không cho hủy nhẹ / không cho tạo lại) khi bill CONTRACT đã PAID hoặc đã có thanh toán liên quan.
+    const hasPaidContractBill = contractBills.some((b) => b.status === "PAID");
+    const hasInProgressPayment = contractBills.some((b) =>
+      b.status === "PARTIALLY_PAID" || b.status === "PENDING_CASH_CONFIRM"
+    );
+    const isPreSignedFinalContract = fc.status === "DRAFT" || fc.status === "WAITING_SIGN";
+
+    // Light cancel: pre-sign + chưa thanh toán gì cho bill CONTRACT
+    if (isPreSignedFinalContract && !hasPaidContractBill) {
+      if (hasInProgressPayment) {
+        return res.status(400).json({
+          success: false,
+          message: "Không thể hủy vì hóa đơn hợp đồng đang có thanh toán/đang chờ xác nhận. Vui lòng xử lý thanh toán trước.",
+        });
+      }
+
+      // Void contract bills (UNPAID) nếu có
+      for (const bill of contractBills) {
+        if (bill.status !== "PAID") {
+          bill.status = "VOID";
+          bill.note = bill.note ? `${bill.note} [Đã hủy do hủy hợp đồng chính thức]` : "Đã hủy do hủy hợp đồng chính thức";
+          await bill.save();
+          console.log(`✅ [LIGHT CANCEL] Voided CONTRACT bill ${bill._id} for FinalContract ${fc._id}`);
+        }
+      }
+
+      // Mark final contract canceled
+      fc.status = "CANCELED";
+      fc.canceledAt = new Date();
+      await fc.save();
+
+      // ✅ Release checkin.finalContractId so admin can create again (phiếu thu vẫn còn hiệu lực nếu còn trong 3 ngày)
+      try {
+        const Checkin = (await import("../models/checkin.model.js")).default;
+        const originContractId = typeof fc.originContractId === "object" && fc.originContractId?._id
+          ? fc.originContractId._id
+          : fc.originContractId;
+        if (originContractId) {
+          await Checkin.updateMany(
+            { contractId: originContractId, finalContractId: fc._id },
+            { $unset: { finalContractId: "" } }
+          );
+          console.log(`✅ [LIGHT CANCEL] Released checkin.finalContractId for originContractId=${originContractId}`);
+        }
+      } catch (e) {
+        console.warn("⚠️ [LIGHT CANCEL] Cannot release checkin.finalContractId:", e?.message || e);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Đã hủy hợp đồng (chưa ký/chưa thanh toán) để tạo lại hóa đơn hợp đồng. Phiếu thu vẫn giữ nguyên nếu còn hiệu lực.",
+        data: formatFinalContract(fc),
+      });
+    }
+
     for (const bill of contractBills) {
       // Chỉ hủy nếu bill chưa thanh toán hoặc chỉ thanh toán một phần
       if (bill.status !== "PAID") {
