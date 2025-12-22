@@ -866,6 +866,9 @@ export const linkCoTenantToContract = async (req, res) => {
 // Admin thêm người ở cùng vào contract (có thể chọn user có sẵn hoặc tạo mới)
 export const addCoTenant = async (req, res) => {
   try {
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin) return res.status(403).json({ success: false, message: "Forbidden" });
+
     const { id } = req.params;
     const { existingUserId, fullName, phone, email, password, identityNo } = req.body;
 
@@ -909,6 +912,9 @@ export const addCoTenant = async (req, res) => {
     const User = (await import("../models/user.model.js")).default;
     let user;
 
+    // Không cho thêm trùng với người thuê chính (main tenant)
+    const mainTenantId = contract.tenantId ? contract.tenantId.toString() : null;
+
     if (existingUserId) {
       // Chọn user có sẵn
       user = await User.findById(existingUserId);
@@ -919,15 +925,44 @@ export const addCoTenant = async (req, res) => {
         });
       }
 
-      // Kiểm tra user này đã được thêm vào contract chưa
-      const exists = contract.coTenants?.find(
-        (ct) => ct.userId?.toString() === existingUserId && ct.status === "ACTIVE"
-      );
-      if (exists) {
+      // ✅ Không cho chọn tài khoản chủ trọ/admin làm "người ở cùng"
+      if ((user.role || "").toUpperCase() !== "TENANT") {
         return res.status(400).json({
           success: false,
-          message: "Người dùng này đã được thêm vào hợp đồng",
+          message: "Không thể thêm tài khoản chủ trọ/admin làm người ở cùng. Vui lòng chọn tài khoản TENANT.",
         });
+      }
+
+      // ✅ Không cho thêm chính người thuê chính vào danh sách người ở cùng
+      if (mainTenantId && user._id?.toString() === mainTenantId) {
+        return res.status(400).json({
+          success: false,
+          message: "Không thể thêm người thuê chính làm người ở cùng",
+        });
+      }
+
+      // Kiểm tra user này đã được thêm vào contract chưa
+      const existingIndex = (contract.coTenants || []).findIndex(
+        (ct) => ct.userId?.toString() === existingUserId
+      );
+      if (existingIndex !== -1) {
+        // Nếu đã từng tồn tại: tránh duplicate record -> nếu đang ACTIVE thì báo lỗi, nếu EXPIRED thì kích hoạt lại
+        const existed = contract.coTenants[existingIndex];
+        if (existed.status === "ACTIVE") {
+          return res.status(400).json({
+            success: false,
+            message: "Người dùng này đã được thêm vào hợp đồng",
+          });
+        }
+        existed.status = "ACTIVE";
+        existed.joinedAt = new Date();
+        existed.leftAt = undefined;
+        existed.fullName = user.fullName;
+        existed.phone = user.phone;
+        existed.email = user.email;
+        existed.identityNo = user.identityNo;
+        await contract.save();
+        console.log(`✅ Reactivated existing co-tenant ${user._id} (${user.fullName}) in contract ${id}`);
       }
 
       console.log(`✅ Using existing user ${user._id} (${user.fullName}) as co-tenant`);
@@ -953,6 +988,31 @@ export const addCoTenant = async (req, res) => {
         });
       }
 
+      // ✅ Không cho tạo mới trùng email/phone với người thuê chính (nếu có)
+      if (mainTenantId) {
+        try {
+          const main = await User.findById(mainTenantId).select("email phone");
+          if (main) {
+            const mainEmail = (main.email || "").toString().toLowerCase();
+            const mainPhone = (main.phone || "").toString();
+            if (mainEmail && (email || "").toString().toLowerCase() === mainEmail) {
+              return res.status(400).json({
+                success: false,
+                message: "Email trùng với người thuê chính, không thể thêm làm người ở cùng",
+              });
+            }
+            if (mainPhone && (phone || "").toString() === mainPhone) {
+              return res.status(400).json({
+                success: false,
+                message: "Số điện thoại trùng với người thuê chính, không thể thêm làm người ở cùng",
+              });
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
       // Hash password
       const passwordHash = await bcrypt.hash(password, 10);
 
@@ -971,15 +1031,19 @@ export const addCoTenant = async (req, res) => {
 
     // Thêm vào coTenants với userId
     if (!contract.coTenants) contract.coTenants = [];
-    contract.coTenants.push({
-      userId: user._id,
-      fullName: user.fullName,
-      phone: user.phone,
-      email: user.email,
-      identityNo: user.identityNo || identityNo,
-      joinedAt: new Date(),
-      status: "ACTIVE", // Mặc định là ACTIVE khi thêm mới
-    });
+    // Nếu branch existingUserId đã reactivate thì không push thêm nữa
+    const alreadyActive = contract.coTenants.some((ct) => ct.userId?.toString() === user._id?.toString() && ct.status === "ACTIVE");
+    if (!alreadyActive) {
+      contract.coTenants.push({
+        userId: user._id,
+        fullName: user.fullName,
+        phone: user.phone,
+        email: user.email,
+        identityNo: user.identityNo || identityNo,
+        joinedAt: new Date(),
+        status: "ACTIVE", // Mặc định là ACTIVE khi thêm mới
+      });
+    }
 
     await contract.save();
 
