@@ -1322,13 +1322,22 @@ export const getExpiringSoonContracts = async (req, res) => {
 // POST /api/final-contracts/rent-additional-room
 export const rentAdditionalRoom = async (req, res) => {
   try {
-    const { tenantId, roomId, startDate, endDate, depositAmount } = req.body;
+    const { tenantId, roomId, startDate, endDate, depositAmount, initialElectricReading } = req.body;
 
     // Validate input
     if (!tenantId || !roomId || !startDate || !endDate) {
       return res.status(400).json({
         success: false,
         message: "tenantId, roomId, startDate, and endDate are required"
+      });
+    }
+
+    // ✅ Validate initialElectricReading (giống tạo phiếu thu)
+    const initialReadingNum = Number(initialElectricReading);
+    if (initialElectricReading === undefined || initialElectricReading === null || Number.isNaN(initialReadingNum) || initialReadingNum < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Số điện hiện tại (kWh) không hợp lệ",
       });
     }
 
@@ -1530,6 +1539,8 @@ export const rentAdditionalRoom = async (req, res) => {
       durationMonths: durationMonths,
       status: "CREATED",
       checkinDate: new Date(startDate),
+      // ✅ Lưu số điện chốt ban đầu cho phòng thuê thêm
+      initialElectricReading: initialReadingNum,
       // ✅ set tiền/ snapshot để UI không bị N/A (và không phụ thuộc việc load users ở FE)
       deposit: toDec(depositNum),
       monthlyRent: room.pricePerMonth,
