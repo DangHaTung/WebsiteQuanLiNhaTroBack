@@ -1,0 +1,590 @@
+// Service tự động tạo hóa đơn hàng tháng cho các phòng
+import mongoose from "mongoose";
+import Contract from "../../models/contract.model.js";
+import Bill from "../../models/bill.model.js";
+import Room from "../../models/room.model.js";
+import RoomFee from "../../models/roomFee.model.js";
+import UtilityFee from "../../models/utilityFee.model.js";
+import { calculateElectricityCost, DEFAULT_ELECTRICITY_TIERS } from "../utility/electricity.service.js";
+
+const toDec = (n) => mongoose.Types.Decimal128.fromString(Number(n).toFixed(2));
+const toNum = (d) => (d === null || d === undefined ? 0 : parseFloat(d.toString()));
+
+/**
+ * Tính toán các khoản phí cho một phòng
+ * @param {Object} params - Tham số tính toán
+ * @param {string} params.roomId - ID phòng
+ * @param {number} params.electricityKwh - Số điện tiêu thụ (kWh)
+ * @param {number} params.waterM3 - Số nước tiêu thụ (m3) - KHÔNG SỬ DỤNG, tiền nước tính theo số người
+ * @param {number} params.occupantCount - Số người ở
+ * @param {number} params.vehicleCount - Số lượng xe (deprecated, dùng vehicles thay thế)
+ * @param {Array} params.vehicles - Danh sách xe chi tiết [{type: 'motorbike'|'electric_bike'|'bicycle', licensePlate?: string}]
+ * @returns {Promise<{lineItems: Array, totalAmount: number, breakdown: Object}>}
+ */
+export async function calculateRoomMonthlyFees({
+  roomId,
+  electricityKwh = 0,
+  waterM3 = 0, // Tham số này không được sử dụng, giữ lại để tương thích API
+  occupantCount = 1,
+  vehicleCount = 0, // Deprecated: dùng vehicles thay thế
+  vehicles = [], // Danh sách xe chi tiết
+  excludeRent = false, // Tham số mới: bỏ tiền thuê phòng
+}) {
+  // Lấy thông tin phòng
+  const room = await Room.findById(roomId);
+  if (!room) {
+    throw new Error(`Không tìm thấy phòng với ID: ${roomId}`);
+  }
+
+  // Lấy cấu hình phí của phòng
+  const roomFee = await RoomFee.findOne({ roomId, isActive: true });
+  if (!roomFee) {
+    throw new Error(`Phòng ${room.roomNumber} chưa được cấu hình phí dịch vụ`);
+  }
+
+  const lineItems = [];
+  const breakdown = {};
+  let totalAmount = 0;
+
+  // 1. Tiền thuê phòng (từ contract) - chỉ tính nếu không excludeRent
+  if (!excludeRent) {
+  const monthlyRent = toNum(room.pricePerMonth);
+  if (monthlyRent > 0) {
+    lineItems.push({
+      item: `Tiền thuê phòng ${room.roomNumber}`,
+      quantity: 1,
+      unitPrice: toDec(monthlyRent),
+      lineTotal: toDec(monthlyRent),
+    });
+    breakdown.rent = monthlyRent;
+    totalAmount += monthlyRent;
+    }
+  }
+
+  // 2. Tiền điện (theo bậc thang + lãi 5%)
+  if (roomFee.appliedTypes.includes("electricity") && electricityKwh > 0) {
+    const activeElec = await UtilityFee.findOne({ type: "electricity", isActive: true });
+    const tiers = activeElec?.electricityTiers?.length ? activeElec.electricityTiers : DEFAULT_ELECTRICITY_TIERS;
+    const vatPercent = typeof activeElec?.vatPercent === "number" ? activeElec.vatPercent : 8;
+    const profitMargin = 0.05; // Lãi 5% trên tiền điện
+    
+    // Debug logging
+    console.log(`[calculateRoomMonthlyFees] Electricity calculation: kwh=${electricityKwh}, tiers count=${tiers?.length || 0}, vatPercent=${vatPercent}, profitMargin=${profitMargin * 100}%`);
+    if (tiers && tiers.length > 0) {
+      console.log(`[calculateRoomMonthlyFees] Tiers from DB:`, JSON.stringify(tiers, null, 2));
+    } else {
+      console.log(`[calculateRoomMonthlyFees] Using DEFAULT_ELECTRICITY_TIERS`);
+    }
+    
+    const elecResult = calculateElectricityCost(electricityKwh, tiers, vatPercent);
+    
+    // Thêm lãi 5% vào tổng tiền điện
+    const electricityWithProfit = elecResult.total * (1 + profitMargin);
+    const profitAmount = elecResult.total * profitMargin;
+    
+    console.log(`[calculateRoomMonthlyFees] Electricity result: subtotal=${elecResult.subtotal}, vat=${elecResult.vat}, total=${elecResult.total}, profit=${profitAmount}, finalTotal=${electricityWithProfit}`);
+    if (elecResult.items && elecResult.items.length > 0) {
+      console.log(`[calculateRoomMonthlyFees] Electricity items:`, JSON.stringify(elecResult.items, null, 2));
+    }
+    
+    lineItems.push({
+      item: `Tiền điện (${electricityKwh} kWh)`,
+      quantity: electricityKwh,
+      unitPrice: toDec(electricityWithProfit / electricityKwh), // Giá trung bình đã bao gồm lãi
+      lineTotal: toDec(electricityWithProfit),
+    });
+    
+    breakdown.electricity = {
+      kwh: electricityKwh,
+      subtotal: elecResult.subtotal,
+      vat: elecResult.vat,
+      costPrice: elecResult.total, // Giá gốc (chưa có lãi)
+      profitMargin: profitMargin,
+      profitAmount: profitAmount,
+      total: electricityWithProfit, // Giá bán (đã có lãi 5%)
+      tiers: elecResult.items,
+    };
+    totalAmount += electricityWithProfit;
+  }
+
+  // 3. Tiền nước (tính theo số người)
+  if (roomFee.appliedTypes.includes("water") && occupantCount > 0) {
+    const activeWater = await UtilityFee.findOne({ type: "water", isActive: true });
+    const waterRate = activeWater?.baseRate || 0;
+    
+    if (waterRate > 0) {
+      const waterAmount = waterRate * occupantCount;
+      
+      lineItems.push({
+        item: `Tiền nước (${occupantCount} người)`,
+        quantity: occupantCount,
+        unitPrice: toDec(waterRate),
+        lineTotal: toDec(waterAmount),
+      });
+      
+      breakdown.water = {
+        occupantCount,
+        rate: waterRate,
+        total: waterAmount,
+        note: "Tính theo số người",
+      };
+      totalAmount += waterAmount;
+    }
+  }
+
+  // 4. Tiền internet (flat rate)
+  if (roomFee.appliedTypes.includes("internet")) {
+    const activeInternet = await UtilityFee.findOne({ type: "internet", isActive: true });
+    const internetRate = activeInternet?.baseRate || 0;
+    
+    if (internetRate > 0) {
+      lineItems.push({
+        item: "Tiền internet",
+        quantity: 1,
+        unitPrice: toDec(internetRate),
+        lineTotal: toDec(internetRate),
+      });
+      
+      breakdown.internet = {
+        rate: internetRate,
+        total: internetRate,
+      };
+      totalAmount += internetRate;
+    }
+  }
+
+  // 5. Phí dọn dẹp (theo số người)
+  if (roomFee.appliedTypes.includes("cleaning") && occupantCount > 0) {
+    const activeCleaning = await UtilityFee.findOne({ type: "cleaning", isActive: true });
+    const cleaningRate = activeCleaning?.baseRate || 0;
+    
+    if (cleaningRate > 0) {
+      const cleaningAmount = cleaningRate * occupantCount;
+      
+      lineItems.push({
+        item: `Phí dọn dẹp (${occupantCount} người)`,
+        quantity: occupantCount,
+        unitPrice: toDec(cleaningRate),
+        lineTotal: toDec(cleaningAmount),
+      });
+      
+      breakdown.cleaning = {
+        occupantCount,
+        rate: cleaningRate,
+        total: cleaningAmount,
+      };
+      totalAmount += cleaningAmount;
+    }
+  }
+
+  // 6. Phí đỗ xe (theo loại xe)
+  // Hỗ trợ cả vehicles array (mới) và vehicleCount (cũ - backward compatible)
+  const hasVehicles = vehicles && vehicles.length > 0;
+  const hasVehicleCount = !hasVehicles && vehicleCount > 0;
+  
+  if (roomFee.appliedTypes.includes("parking") && (hasVehicles || hasVehicleCount)) {
+    const activeParking = await UtilityFee.findOne({ type: "parking", isActive: true });
+    const parkingRate = activeParking?.baseRate || 0;
+    
+    if (parkingRate > 0) {
+      if (hasVehicles) {
+        // Logic mới: tính theo từng xe với loại xe
+        // Xe điện = gấp đôi giá xe máy/xe đạp
+        let parkingTotal = 0;
+        const vehicleDetails = [];
+        
+        // Đếm số lượng từng loại xe
+        const motorbikeCount = vehicles.filter(v => v.type === 'motorbike').length;
+        const electricBikeCount = vehicles.filter(v => v.type === 'electric_bike').length;
+        const bicycleCount = vehicles.filter(v => v.type === 'bicycle').length;
+        
+        // Tính phí xe máy
+        if (motorbikeCount > 0) {
+          const motorbikeAmount = parkingRate * motorbikeCount;
+          const motorbikePlates = vehicles
+            .filter(v => v.type === 'motorbike' && v.licensePlate)
+            .map(v => v.licensePlate)
+            .join(', ');
+          
+          lineItems.push({
+            item: `🏍️ Phí xe máy${motorbikePlates ? ` (${motorbikePlates})` : ` (${motorbikeCount} xe)`}`,
+            quantity: motorbikeCount,
+            unitPrice: toDec(parkingRate),
+            lineTotal: toDec(motorbikeAmount),
+          });
+          
+          parkingTotal += motorbikeAmount;
+          vehicleDetails.push({
+            type: 'motorbike',
+            count: motorbikeCount,
+            rate: parkingRate,
+            total: motorbikeAmount,
+            plates: vehicles.filter(v => v.type === 'motorbike').map(v => v.licensePlate).filter(Boolean),
+          });
+        }
+        
+        // Tính phí xe điện (gấp đôi)
+        if (electricBikeCount > 0) {
+          const electricRate = parkingRate * 2; // Gấp đôi
+          const electricAmount = electricRate * electricBikeCount;
+          const electricPlates = vehicles
+            .filter(v => v.type === 'electric_bike' && v.licensePlate)
+            .map(v => v.licensePlate)
+            .join(', ');
+          
+          lineItems.push({
+            item: `⚡ Phí xe điện${electricPlates ? ` (${electricPlates})` : ` (${electricBikeCount} xe)`}`,
+            quantity: electricBikeCount,
+            unitPrice: toDec(electricRate),
+            lineTotal: toDec(electricAmount),
+          });
+          
+          parkingTotal += electricAmount;
+          vehicleDetails.push({
+            type: 'electric_bike',
+            count: electricBikeCount,
+            rate: electricRate,
+            total: electricAmount,
+            plates: vehicles.filter(v => v.type === 'electric_bike').map(v => v.licensePlate).filter(Boolean),
+          });
+        }
+        
+        // Tính phí xe đạp
+        if (bicycleCount > 0) {
+          const bicycleAmount = parkingRate * bicycleCount;
+          
+          lineItems.push({
+            item: `🚲 Phí xe đạp (${bicycleCount} xe)`,
+            quantity: bicycleCount,
+            unitPrice: toDec(parkingRate),
+            lineTotal: toDec(bicycleAmount),
+          });
+          
+          parkingTotal += bicycleAmount;
+          vehicleDetails.push({
+            type: 'bicycle',
+            count: bicycleCount,
+            rate: parkingRate,
+            total: bicycleAmount,
+          });
+        }
+        
+        breakdown.parking = {
+          vehicles: vehicleDetails,
+          baseRate: parkingRate,
+          electricRate: parkingRate * 2,
+          total: parkingTotal,
+        };
+        totalAmount += parkingTotal;
+        
+      } else {
+        // Logic cũ (backward compatible): tính theo số lượng xe đơn giản
+        const parkingAmount = parkingRate * vehicleCount;
+        
+        lineItems.push({
+          item: `Phí đỗ xe (${vehicleCount} xe)`,
+          quantity: vehicleCount,
+          unitPrice: toDec(parkingRate),
+          lineTotal: toDec(parkingAmount),
+        });
+        
+        breakdown.parking = {
+          vehicleCount: vehicleCount,
+          rate: parkingRate,
+          total: parkingAmount,
+        };
+        totalAmount += parkingAmount;
+      }
+    }
+  }
+
+  return {
+    lineItems,
+    totalAmount,
+    breakdown,
+  };
+}
+
+/**
+ * Tạo hóa đơn hàng tháng cho một phòng cụ thể
+ * @param {Object} params - Tham số tạo hóa đơn
+ * @param {string} params.contractId - ID hợp đồng
+ * @param {number} params.electricityKwh - Số điện tiêu thụ
+ * @param {number} params.waterM3 - Số nước tiêu thụ
+ * @param {number} params.occupantCount - Số người ở
+ * @param {Date} params.billingDate - Ngày lập hóa đơn
+ * @param {string} params.note - Ghi chú
+ * @returns {Promise<Object>} - Bill đã tạo
+ */
+export async function createMonthlyBillForRoom({
+  contractId,
+  electricityKwh = 0,
+  waterM3 = 0,
+  occupantCount = 1,
+  billingDate = new Date(),
+  note = "",
+}) {
+  // Lấy thông tin hợp đồng
+  const contract = await Contract.findById(contractId)
+    .populate("roomId")
+    .populate("tenantId", "fullName email phone");
+  
+  if (!contract) {
+    throw new Error(`Không tìm thấy hợp đồng với ID: ${contractId}`);
+  }
+
+  // ✅ SỬA LẠI: Không yêu cầu Contract phải ACTIVE nếu đã có FinalContract SIGNED
+  // Kiểm tra xem có FinalContract SIGNED không
+  const FinalContract = (await import("../../models/finalContract.model.js")).default;
+  const finalContract = await FinalContract.findOne({
+    originContractId: contractId,
+    status: "SIGNED"
+  });
+  
+  // Nếu không có FinalContract SIGNED, thì Contract phải ACTIVE
+  if (!finalContract && contract.status !== "ACTIVE") {
+    throw new Error(`Hợp đồng ${contractId} không ở trạng thái ACTIVE và chưa có FinalContract SIGNED`);
+  }
+
+  const room = contract.roomId;
+  if (!room) {
+    throw new Error(`Không tìm thấy thông tin phòng cho hợp đồng ${contractId}`);
+  }
+
+  // Kiểm tra xem đã có hóa đơn cho tháng này chưa
+  const billingMonth = new Date(billingDate);
+    const startOfMonth = new Date(billingMonth.getFullYear(), billingMonth.getMonth(), 1);
+    const endOfMonth = new Date(billingMonth.getFullYear(), billingMonth.getMonth() + 1, 0, 23, 59, 59);
+
+  // ✅ RULE: Mỗi phòng (contract) chỉ được phát hành 1 hóa đơn MONTHLY / tháng
+  // Nếu đã có bill MONTHLY đã phát hành trong tháng (không phải DRAFT/VOID) thì không tạo thêm (kể cả tạo draft).
+  const existingPublishedBill = await Bill.findOne({
+    contractId,
+    billType: "MONTHLY",
+    status: { $nin: ["DRAFT", "VOID"] },
+    billingDate: {
+      $gte: startOfMonth,
+      $lte: endOfMonth,
+    },
+  }).select("_id billingDate status");
+
+  if (existingPublishedBill) {
+    throw new Error(
+      `Đã tồn tại hóa đơn đã phát hành tháng ${billingMonth.getMonth() + 1}/${billingMonth.getFullYear()} cho phòng ${room.roomNumber}`
+    );
+  }
+
+  // Nếu đang tạo DRAFT bill (electricityKwh = 0), xóa draft cũ trước (cho phép tạo lại)
+  if (electricityKwh === 0) {
+    const existingDraftBill = await Bill.findOne({
+      contractId,
+      status: "DRAFT",
+      billType: "MONTHLY",
+      billingDate: {
+        $gte: startOfMonth,
+        $lte: endOfMonth,
+      },
+    });
+
+    if (existingDraftBill) {
+      console.log(`[createMonthlyBillForRoom] Xóa draft bill cũ: ${existingDraftBill._id} cho phòng ${room.roomNumber}`);
+      await Bill.deleteOne({ _id: existingDraftBill._id });
+    }
+  }
+
+  // Tính toán các khoản phí
+  const feeCalculation = await calculateRoomMonthlyFees({
+    roomId: room._id,
+    electricityKwh,
+    waterM3,
+    occupantCount,
+  });
+
+  // Tạo hóa đơn mới
+  // Nếu electricityKwh = 0, tạo bill DRAFT (nháp), ngược lại tạo UNPAID
+  const billStatus = electricityKwh === 0 ? "DRAFT" : "UNPAID";
+  
+  const bill = new Bill({
+    contractId,
+    billingDate: new Date(billingDate),
+    billType: "MONTHLY",
+    status: billStatus,
+    lineItems: feeCalculation.lineItems,
+    amountDue: toDec(feeCalculation.totalAmount),
+    amountPaid: toDec(0),
+    payments: [],
+    note: note || generateBillNote(billingMonth, room.roomNumber),
+    metadata: {
+      breakdown: feeCalculation.breakdown, // Lưu breakdown để ADMIN xem lãi
+    },
+  });
+
+  // Helper function để tạo ghi chú hóa đơn với tháng trước
+  function generateBillNote(billingDate, roomNumber) {
+    // Hóa đơn tạo vào tháng X là để thu tiền của tháng X-1 (tháng trước)
+    // Ví dụ: tạo hóa đơn vào tháng 12/2025 → thu tiền tháng 11/2025
+    const previousMonth = new Date(billingDate);
+    previousMonth.setMonth(previousMonth.getMonth() - 1);
+    return `Hóa đơn tháng ${previousMonth.getMonth() + 1}/${previousMonth.getFullYear()} - Phòng ${roomNumber}`;
+  }
+
+  await bill.save();
+
+  return {
+    bill,
+    breakdown: feeCalculation.breakdown,
+    room: {
+      id: room._id,
+      roomNumber: room.roomNumber,
+    },
+    tenant: contract.tenantId ? {
+      id: contract.tenantId._id,
+      fullName: contract.tenantId.fullName,
+      email: contract.tenantId.email,
+      phone: contract.tenantId.phone,
+    } : null,
+  };
+}
+
+/**
+ * Tạo hóa đơn hàng tháng cho tất cả các phòng đang có hợp đồng ACTIVE
+ * @param {Object} params - Tham số
+ * @param {Date} params.billingDate - Ngày lập hóa đơn
+ * @param {Object} params.roomUsageData - Dữ liệu tiêu thụ theo phòng { roomId: { electricityKwh, waterM3, occupantCount } }
+ * @returns {Promise<{success: Array, failed: Array, summary: Object}>}
+ */
+export async function createMonthlyBillsForAllRooms({
+  billingDate = new Date(),
+  roomUsageData = {},
+}) {
+  const FinalContract = (await import("../../models/finalContract.model.js")).default;
+  const results = {
+    success: [],
+    failed: [],
+    summary: {
+      total: 0,
+      created: 0,
+      skipped: 0,
+      errors: 0,
+    },
+  };
+
+  // ✅ SỬA LẠI LOGIC: Tìm từ FinalContract với status "SIGNED" thay vì Contract
+  // Vì sau khi có FinalContract, Contract có thể không còn ACTIVE
+  // Lấy tất cả FinalContract SIGNED
+  const signedFinalContracts = await FinalContract.find({ status: "SIGNED" })
+    .populate("roomId")
+    .populate("tenantId", "fullName email phone")
+    .populate("originContractId");
+
+  results.summary.total = signedFinalContracts.length;
+
+  for (const finalContract of signedFinalContracts) {
+    try {
+      const room = finalContract.roomId;
+      if (!room) {
+        results.failed.push({
+          finalContractId: finalContract._id,
+          error: "Không tìm thấy thông tin phòng",
+        });
+        results.summary.errors++;
+        continue;
+      }
+
+      // Lấy originContractId từ FinalContract
+      const contract = finalContract.originContractId;
+      if (!contract) {
+        results.failed.push({
+          finalContractId: finalContract._id,
+          roomNumber: room.roomNumber,
+          error: "Không tìm thấy Contract gốc",
+        });
+        results.summary.errors++;
+        continue;
+      }
+
+      // ✅ VALIDATION: Chỉ tạo bill MONTHLY nếu:
+      // 1. FinalContract đã SIGNED (đã kiểm tra ở trên)
+      // 2. Bill CONTRACT đã PAID
+      
+      // Kiểm tra Bill CONTRACT đã thanh toán chưa
+      // Tìm bill CONTRACT theo finalContractId (vì bill CONTRACT được tạo với finalContractId)
+      const contractBill = await Bill.findOne({
+        finalContractId: finalContract._id,
+        billType: "CONTRACT",
+      });
+      
+      if (!contractBill || contractBill.status !== "PAID") {
+        results.failed.push({
+          finalContractId: finalContract._id,
+          contractId: contract._id,
+          roomNumber: room.roomNumber,
+          error: "Bill CONTRACT (tháng đầu) chưa thanh toán",
+        });
+        results.summary.skipped++;
+        continue;
+      }
+
+      // Lấy dữ liệu tiêu thụ cho phòng này (nếu có)
+      const usage = roomUsageData[room._id.toString()] || {};
+      const electricityKwh = usage.electricityKwh || 0;
+      const waterM3 = usage.waterM3 || 0;
+      const occupantCount = usage.occupantCount || 1;
+
+      // Tạo hóa đơn (dùng contractId từ originContractId)
+      const result = await createMonthlyBillForRoom({
+        contractId: contract._id,
+        electricityKwh,
+        waterM3,
+        occupantCount,
+        billingDate,
+      });
+
+      // Cập nhật finalContractId cho bill MONTHLY
+      if (result.bill) {
+        result.bill.finalContractId = finalContract._id;
+        await result.bill.save();
+      }
+
+      results.success.push({
+        billId: result.bill._id,
+        contractId: contract._id,
+        finalContractId: finalContract._id,
+        roomNumber: result.room.roomNumber,
+        tenantName: result.tenant?.fullName || "N/A",
+        totalAmount: toNum(result.bill.amountDue),
+        breakdown: result.breakdown,
+      });
+      results.summary.created++;
+    } catch (error) {
+      // Nếu lỗi là "đã tồn tại hóa đơn", đánh dấu là skipped
+      if (error.message.includes("Đã tồn tại hóa đơn")) {
+        results.failed.push({
+          finalContractId: finalContract._id,
+          contractId: finalContract.originContractId?._id || "N/A",
+          roomNumber: finalContract.roomId?.roomNumber || "N/A",
+          error: error.message,
+          type: "SKIPPED",
+        });
+        results.summary.skipped++;
+      } else {
+        results.failed.push({
+          finalContractId: finalContract._id,
+          contractId: finalContract.originContractId?._id || "N/A",
+          roomNumber: finalContract.roomId?.roomNumber || "N/A",
+          error: error.message,
+          type: "ERROR",
+        });
+        results.summary.errors++;
+      }
+    }
+  }
+
+  return results;
+}
+
+export default {
+  calculateRoomMonthlyFees,
+  createMonthlyBillForRoom,
+  createMonthlyBillsForAllRooms,
+};
